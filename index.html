@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Compress images to JPEGs under 200 KB and download them individually or as a ZIP.">
+  <title>Image Desk — JPEGs under 200 KB</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.mjs"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="m4 16 5-5 4 4 2-2 5 5"/><circle cx="15.5" cy="8.5" r="1.2"/></svg></span>Image Desk</div>
+    </div>
+  </header>
+  <main class="shell">
+    <div class="intro">
+      <h1>Compress images to<br class="desktop-break"> <span>under 200 KB</span></h1>
+      <p>Turn one image or a whole batch into smaller JPEGs.<br class="desktop-break"> Download them one at a time or together in a ZIP.</p>
+    </div>
+    <div class="workspace">
+      <section class="panel upload-panel" aria-labelledby="upload-title">
+        <div class="panel-heading">
+          <div class="panel-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></div>
+          <div><h2 id="upload-title">Add images</h2><p>Select one or more images to compress.</p></div>
+        </div>
+        <div class="dropzone" id="dropzone">
+          <div class="drop-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
+          <p class="drop-title">Drag and drop images here</p>
+          <button class="button primary" id="choose" type="button">Choose images</button>
+          <input type="file" id="files" multiple accept="image/*,.heic,.heif,.avif" hidden>
+          <p class="formats">JPEG, PNG, WebP and other browser-supported images</p>
+        </div>
+        <p class="privacy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3m-4 4v3"/></svg> Images are processed on your device.</p>
+      </section>
+      <section class="panel results-panel" aria-labelledby="results-title">
+        <div class="panel-heading">
+          <div class="panel-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m-4-4 4 4 4-4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></div>
+          <div><h2 id="results-title">Downloads</h2><p id="summary" aria-live="polite">JPEGs will appear here as they’re ready.</p></div>
+        </div>
+        <div class="empty" id="empty">
+          <svg class="empty-art" viewBox="0 0 126 101" fill="none" aria-hidden="true">
+            <circle cx="63" cy="50" r="43" fill="#f2efff"/>
+            <path d="M26 35v10m-5-5h10m73 24v10m-5-5h10m-19-48v8m-4-4h8" stroke="#b6a6f3" stroke-width="2" stroke-linecap="round"/>
+            <rect x="43" y="28" width="42" height="52" rx="7" transform="rotate(-13 43 28)" fill="#e5ddff" stroke="#c0aff8" stroke-width="1.5"/>
+            <rect x="42" y="27" width="43" height="53" rx="7" fill="white" stroke="#aa94fa" stroke-width="1.5"/>
+            <path d="M56 38h15m-15 6h10" stroke="#d5c9fa" stroke-width="2" stroke-linecap="round"/>
+            <path d="M64 51v16m-6-6 6 6 6-6" stroke="#7654da" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <p class="empty-title">No images yet</p>
+          <p>Add images to start compressing.</p>
+        </div>
+        <ul class="results" id="results" aria-label="Images" hidden></ul>
+        <div class="results-actions">
+          <button id="clear" class="button quiet" type="button" hidden>Clear all</button>
+          <button id="zip" class="button outline" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m-4-4 4 4 4-4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg><span>Download ZIP</span></button>
+        </div>
+        <p id="zip-error" class="error" role="alert" hidden></p>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
