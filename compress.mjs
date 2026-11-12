@@ -26,12 +26,18 @@ function encode(canvas, quality) {
 
 export async function compressImage(file) {
   const image = await loadImage(file);
+  return compressToJpeg(image, image.naturalWidth, image.naturalHeight);
+}
+
+export function compressPage(canvas) {
+  return compressToJpeg(canvas, canvas.width, canvas.height);
+}
+
+async function compressToJpeg(source, width, height) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('Image conversion is unavailable in this browser.');
 
-  const width = image.naturalWidth;
-  const height = image.naturalHeight;
   let scale = Math.min(1, 4096 / Math.max(width, height), Math.sqrt(12_000_000 / (width * height)));
   try {
     while (true) {
@@ -40,7 +46,7 @@ export async function compressImage(file) {
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
 
       const highQuality = await encode(canvas, 0.94);
       if (highQuality.size < BYTE_LIMIT) return highQuality;
@@ -72,13 +78,14 @@ export async function compressImage(file) {
   }
 }
 
-export function uniqueJpegName(original, usedNames) {
+export function uniqueJpegName(original, usedNames, suffix = '') {
   const clean = original.normalize('NFC')
     .replace(/\.[^.]+$/, '')
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
     .replace(/^[. ]+|[. ]+$/g, '');
   let stem = Array.from(clean).slice(0, 90).join('') || 'image';
   if (/^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/i.test(stem)) stem = '_' + stem;
+  stem += suffix;
   let name = stem + '.jpg';
   let index = 2;
   while (usedNames.has(name.toLowerCase())) {

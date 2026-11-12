@@ -11,7 +11,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.75;strok
 .intro{padding:65px 0 43px}
 h1,h2,p{margin:0}
 h1{font-size:clamp(38px,6vw,68px);font-weight:780;line-height:1.025;letter-spacing:-.066em}
-h1 span{color:var(--violet)}
+h1 span{display:block;color:var(--violet)}
 .intro p{margin-top:21px;font-size:17px;line-height:1.58;color:var(--muted)}
 .workspace{display:grid;grid-template-columns:1fr 1fr;gap:22px;padding-bottom:56px;align-items:start}
 .panel{background:#fff;border:1px solid var(--line);border-radius:18px;padding:23px;min-width:0;box-shadow:0 3px 9px #23133906}
@@ -38,6 +38,7 @@ h2{font-size:19px;line-height:1.2;font-weight:740;letter-spacing:-.03em}
 .result{display:flex;gap:10px;align-items:center;padding:10px;min-height:65px}
 .result+.result{border-top:1px solid #efebf5}
 .thumb{width:40px;height:40px;display:grid;place-items:center;object-fit:cover;border-radius:7px;background:var(--tint);flex:none;color:var(--violet)}
+.page-thumb{object-fit:contain;border:1px solid var(--line)}
 .thumb svg{width:18px;height:18px}
 .file-info{flex:1;min-width:0}
 .file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:670;font-size:13px}
@@ -52,3 +53,4 @@ h2{font-size:19px;line-height:1.2;font-weight:740;letter-spacing:-.03em}
 .outline:disabled{color:#756a8b;background:#f7f4fb;border-color:#eee9f5;cursor:default}
 .quiet{color:var(--violet);background:none}
 @media(max-width:750px){.shell{width:calc(100% - 32px)}.intro{padding:43px 0 30px}.workspace{grid-template-columns:1fr;gap:15px}.panel{padding:18px}.desktop-break{display:none}.header-inner{min-height:61px}.intro p{font-size:15px;margin-top:15px}}
+@media(max-width:750px){h1 span{display:inline}}
