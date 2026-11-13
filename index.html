@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Convert images and PDF pages to JPEGs under 200 KB, then download them individually or as a ZIP.">
   <title>Image Desk — JPEGs under 200 KB</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2">
   <script type="module" src="app.mjs"></script>
 </head>
 <body>
@@ -17,7 +17,7 @@
   <main class="shell">
     <div class="intro">
       <h1>Make JPEGs <span>under 200 KB</span></h1>
-      <p>Convert images and PDF pages to JPEGs.<br class="desktop-break"> Download them one at a time or together in a ZIP.</p>
+      <p>Convert images and PDF pages to JPEGs. Download them one at a time or together in a ZIP.</p>
     </div>
     <div class="workspace">
       <section class="panel upload-panel" aria-labelledby="upload-title">
@@ -40,13 +40,11 @@
           <div><h2 id="results-title">Downloads</h2><p id="summary" aria-live="polite">JPEGs will appear here as they’re ready.</p></div>
         </div>
         <div class="empty" id="empty">
-          <svg class="empty-art" viewBox="0 0 126 101" fill="none" aria-hidden="true">
-            <circle cx="63" cy="50" r="43" fill="#f2efff"/>
-            <path d="M26 35v10m-5-5h10m73 24v10m-5-5h10m-19-48v8m-4-4h8" stroke="#b6a6f3" stroke-width="2" stroke-linecap="round"/>
-            <rect x="43" y="28" width="42" height="52" rx="7" transform="rotate(-13 43 28)" fill="#e5ddff" stroke="#c0aff8" stroke-width="1.5"/>
-            <rect x="42" y="27" width="43" height="53" rx="7" fill="white" stroke="#aa94fa" stroke-width="1.5"/>
-            <path d="M56 38h15m-15 6h10" stroke="#d5c9fa" stroke-width="2" stroke-linecap="round"/>
-            <path d="M64 51v16m-6-6 6 6 6-6" stroke="#7654da" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <svg class="empty-art" viewBox="0 0 90 75" aria-hidden="true">
+            <rect class="back-sheet" x="23" y="11" width="42" height="53" transform="rotate(-12 44 37)"/>
+            <rect class="front-sheet" x="28" y="12" width="42" height="53"/>
+            <path class="sheet-lines" d="M41 24h16m-16 6h10"/>
+            <path class="sheet-arrow" d="M49 38v15m-5-5 5 5 5-5"/>
           </svg>
           <p class="empty-title">No files yet</p>
           <p>Add images or PDFs to get started.</p>
