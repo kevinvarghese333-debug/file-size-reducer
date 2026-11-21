@@ -1,5 +1,5 @@
-import { loadImage } from './compress.mjs?v=4';
-import { openPdf, withPdfPage } from './pdf.mjs?v=4';
+import { loadImage } from './compress.mjs?v=6';
+import { openPdf, withPdfPage } from './pdf.mjs?v=6';
 import { encodeCcittFax } from './vendor/pdf-codec-5.9.0/image/ccitt-encode.js';
 
 export const PDF_BYTE_LIMIT = 198_000;
@@ -104,7 +104,7 @@ async function monochromeBytes(canvas, signal) {
       const sum = (integral[bottom * stride + right] - integral[top * stride + right]
         - integral[bottom * stride + left] + integral[top * stride + left]) >>> 0;
       const mean = sum / ((right - left) * (bottom - top));
-      if (gray[y * width + x] < Math.max(55, mean - 12)) {
+      if (gray[y * width + x] < Math.max(55, mean - 8)) {
         packed[y * rowBytes + (x >> 3)] &= ~(128 >> (x & 7));
       }
     }
@@ -179,7 +179,9 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'c
       }
     }
 
-    const resolutions = isPdf ? [300, 200] : [200];
+    const resolutions = isPdf
+      ? (mode === 'monochrome' ? [300, 200, 180, 160, 150, 140, 130, 120] : [300, 200])
+      : [200];
     for (const dpi of resolutions) {
       const pages = [];
       for (let number = 1; number <= total; number++) {
@@ -202,7 +204,7 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'c
     const suggestion = mode === 'color'
       ? 'Try Black & white for scanned text, or upload fewer pages.'
       : 'Upload fewer pages or use a higher file-size limit at the receiving portal.';
-    throw new Error('This document cannot fit under 198 KB at the supported clarity settings. ' + suggestion);
+    throw new Error('This document could not fit under 198 KB at the available scan resolutions. ' + suggestion);
   } finally {
     if (source) await source.close().catch(() => {});
   }

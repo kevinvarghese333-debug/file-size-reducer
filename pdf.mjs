@@ -1,4 +1,4 @@
-import { compressPage } from './compress.mjs?v=4';
+import { compressPage } from './compress.mjs?v=6';
 
 const assets = new URL('./vendor/pdfjs-6.5.438/', import.meta.url);
 

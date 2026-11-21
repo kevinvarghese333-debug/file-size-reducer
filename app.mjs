@@ -1,7 +1,7 @@
-import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=4';
-import { compressPdfFile } from './pdf-output.mjs?v=4';
-import { openPdf, renderPdfPage } from './pdf.mjs?v=4';
-import { makeZip } from './zip.mjs?v=4';
+import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=6';
+import { compressPdfFile } from './pdf-output.mjs?v=6';
+import { openPdf, renderPdfPage } from './pdf.mjs?v=6';
+import { makeZip } from './zip.mjs?v=6';
 
 const choose = document.querySelector('#choose');
 const filesInput = document.querySelector('#files');
@@ -231,7 +231,7 @@ for (const input of formatInputs) {
     outputLimit.textContent = pdf ? 'under 198 KB' : 'under 200 KB';
     pdfOptions.hidden = !pdf;
     formatHelp.textContent = pdf
-      ? 'PDF text and graphics are optimized first. Scanned pages keep 200 dpi or higher. Choose Black & white for clearer scanned text in a smaller file. This removes colors from scans.'
+      ? 'Original colors optimizes PDF text and graphics first. Black & white adapts scan resolution to fit 198 KB and removes scan colors. Check small text and faint handwriting in the download.'
       : 'Each PDF page becomes a separate JPEG under 200 KB.';
     reprocessFiles();
   });
