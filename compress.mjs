@@ -1,6 +1,6 @@
 export const BYTE_LIMIT = 200_000;
 
-async function loadImage(file) {
+export async function loadImage(file) {
   const url = URL.createObjectURL(file);
   const image = new Image();
   try {

@@ -1,7 +1,7 @@
-import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=3';
-import { compressPdfFile } from './pdf-output.mjs?v=3';
-import { openPdf, renderPdfPage } from './pdf.mjs?v=3';
-import { makeZip } from './zip.mjs?v=3';
+import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=4';
+import { compressPdfFile } from './pdf-output.mjs?v=4';
+import { openPdf, renderPdfPage } from './pdf.mjs?v=4';
+import { makeZip } from './zip.mjs?v=4';
 
 const choose = document.querySelector('#choose');
 const filesInput = document.querySelector('#files');
@@ -17,6 +17,8 @@ const formatInputs = document.querySelectorAll('[name="output-format"]');
 const formatHelp = document.querySelector('#format-help');
 const outputTitle = document.querySelector('#output-title');
 const outputLimit = document.querySelector('#output-limit');
+const pdfOptions = document.querySelector('#pdf-options');
+const pdfMode = document.querySelector('#pdf-mode');
 
 const entries = [];
 const usedNames = new Set();
@@ -76,7 +78,8 @@ function showResult(entry, blob) {
   }
   const prefix = entry.pageLabel ? entry.pageLabel + ' · ' : formatSize(entry.file.size) + ' → ';
   const type = isPdf ? 'PDF · ' + entry.pageCount + (entry.pageCount === 1 ? ' page' : ' pages') : 'JPEG';
-  entry.status.textContent = prefix + formatSize(blob.size) + ' · ' + type;
+  entry.status.textContent = prefix + formatSize(blob.size) + ' · ' + type +
+    (entry.detail ? ' · ' + entry.detail : '');
 
   const link = document.createElement('a');
   link.className = 'button download';
@@ -168,8 +171,9 @@ async function processQueue() {
           await processOutput(entry, async () => {
             const result = await compressPdfFile(entry.file, entry.isPdf, signal, message => {
               if (!signal.aborted) entry.status.textContent = message;
-            });
+            }, entry.pdfMode);
             entry.pageCount = result.pageCount;
+            entry.detail = result.detail;
             return result.blob;
           }, signal);
         } else if (entry.isPdf) {
@@ -194,6 +198,7 @@ function addFiles(files) {
     const entry = createEntry(file.name);
     entry.file = file;
     entry.outputFormat = document.querySelector('[name="output-format"]:checked').value;
+    entry.pdfMode = pdfMode.value;
     entry.isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
     if (entry.outputFormat === 'pdf') {
       entry.name = uniqueOutputName(file.name, usedNames, '.pdf', '-compressed');
@@ -215,8 +220,9 @@ for (const input of formatInputs) {
     const pdf = input.value === 'pdf';
     outputTitle.textContent = pdf ? 'Make PDFs ' : 'Make JPEGs ';
     outputLimit.textContent = pdf ? 'under 198 KB' : 'under 200 KB';
+    pdfOptions.hidden = !pdf;
     formatHelp.textContent = pdf
-      ? 'One PDF per uploaded file, with all pages kept in order. Large PDFs are flattened to images. Fine detail may be reduced to meet the size limit.'
+      ? 'PDF text and graphics are optimized first. Scanned pages keep 200 dpi or higher. Choose Black & white for clearer scanned text in a smaller file. This removes colors from scans.'
       : 'Each PDF page becomes a separate JPEG under 200 KB.';
   });
 }

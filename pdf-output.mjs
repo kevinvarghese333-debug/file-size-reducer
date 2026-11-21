@@ -1,9 +1,10 @@
-import { compressImage } from './compress.mjs?v=3';
-import { openPdf, renderPdfPage } from './pdf.mjs?v=3';
+import { loadImage } from './compress.mjs?v=4';
+import { openPdf, withPdfPage } from './pdf.mjs?v=4';
+import { encodeCcittFax } from './vendor/pdf-codec-5.9.0/image/ccitt-encode.js';
 
 export const PDF_BYTE_LIMIT = 198_000;
 
-// Every page is a JPEG XObject with a matching page box. Byte offsets are
+// Every page is an image XObject with a matching page box. Byte offsets are
 // measured from encoded chunks so binary images cannot corrupt the xref.
 export function buildPdf(pages) {
   const encoder = new TextEncoder();
@@ -37,8 +38,13 @@ export function buildPdf(pages) {
       '] /Resources << /XObject << /Im ' + (number + 1) + ' 0 R >> >> /Contents ' + (number + 2) + ' 0 R >>');
 
     offsets[number + 1] = length;
+    const encoding = page.fax
+      ? '/DeviceGray /BitsPerComponent 1 /Filter /CCITTFaxDecode /DecodeParms << /K -1 /Columns ' +
+        page.imageWidth + ' /Rows ' + page.imageHeight + ' /BlackIs1 false /EndOfBlock false >>'
+      : page.monochrome ? '/DeviceGray /BitsPerComponent 1 /Filter /FlateDecode'
+        : '/DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode';
     append((number + 1) + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + page.imageWidth +
-      ' /Height ' + page.imageHeight + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' +
+      ' /Height ' + page.imageHeight + ' /ColorSpace ' + encoding + ' /Length ' +
       page.bytes.length + ' >>\nstream\n');
     append(page.bytes);
     append('\nendstream\nendobj\n');
@@ -54,64 +60,149 @@ export function buildPdf(pages) {
   return new Blob(chunks, { type: 'application/pdf' });
 }
 
-async function jpegPage(blob, dimensions) {
-  const image = await createImageBitmap(blob);
+async function optimizeOriginal(file, signal) {
+  const { PDFDocument } = await import('./vendor/pdf-lib-1.17.1/pdf-lib.min.mjs');
+  signal.throwIfAborted();
+  const pdf = await PDFDocument.load(await file.arrayBuffer(), { updateMetadata: false });
+  const bytes = await pdf.save({ useObjectStreams: true, updateFieldAppearances: false, addDefaultPage: false });
+  signal.throwIfAborted();
+  return new Blob([bytes], { type: 'application/pdf' });
+}
+
+// Threshold against the local paper brightness. This retains thin dark strokes
+// on uneven scans and stores sharp black/white pixels without JPEG artifacts.
+async function monochromeBytes(canvas, signal) {
+  const { width, height } = canvas;
+  const rgba = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+  const gray = new Uint8Array(width * height);
+  const stride = width + 1;
+  const integral = new Uint32Array(stride * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      const value = (rgba[i * 4] * 77 + rgba[i * 4 + 1] * 150 + rgba[i * 4 + 2] * 29) >> 8;
+      gray[i] = value;
+      rowSum += value;
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum;
+    }
+  }
+
+  const rowBytes = Math.ceil(width / 8);
+  const packed = new Uint8Array(rowBytes * height);
+  packed.fill(255);
+  const radius = 20;
+  for (let y = 0; y < height; y++) {
+    signal.throwIfAborted();
+    const top = Math.max(0, y - radius);
+    const bottom = Math.min(height, y + radius + 1);
+    for (let x = 0; x < width; x++) {
+      const left = Math.max(0, x - radius);
+      const right = Math.min(width, x + radius + 1);
+      // The local window sum fits in 32 bits, including when the full
+      // integral image wraps on a large page.
+      const sum = (integral[bottom * stride + right] - integral[top * stride + right]
+        - integral[bottom * stride + left] + integral[top * stride + left]) >>> 0;
+      const mean = sum / ((right - left) * (bottom - top));
+      if (gray[y * width + x] < Math.max(55, mean - 12)) {
+        packed[y * rowBytes + (x >> 3)] &= ~(128 >> (x & 7));
+      }
+    }
+  }
+  const compressed = new Blob([packed]).stream().pipeThrough(new CompressionStream('deflate'));
+  const flate = new Uint8Array(await new Response(compressed).arrayBuffer());
+  const fax = encodeCcittFax(packed, { columns: width, rows: height, maxBytes: flate.length });
+  return fax && fax.length < flate.length ? { bytes: fax, fax: true } : { bytes: flate, fax: false };
+}
+
+async function imagePage(canvas, dimensions, mode, quality, signal) {
+  let bytes;
+  let fax = false;
+  if (mode === 'monochrome') {
+    ({ bytes, fax } = await monochromeBytes(canvas, signal));
+  } else {
+    const jpeg = await new Promise((resolve, reject) => {
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode this page.')),
+        'image/jpeg', quality);
+    });
+    bytes = new Uint8Array(await jpeg.arrayBuffer());
+  }
+  return {
+    bytes,
+    ...dimensions,
+    imageWidth: canvas.width,
+    imageHeight: canvas.height,
+    monochrome: mode === 'monochrome',
+    fax,
+  };
+}
+
+async function withImageCanvas(file, signal, consume) {
+  const image = await loadImage(file);
+  signal.throwIfAborted();
+  const canvas = document.createElement('canvas');
+  const scale = Math.min(1, Math.sqrt(24_000_000 / (image.naturalWidth * image.naturalHeight)));
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
   try {
-    return {
-      bytes: new Uint8Array(await blob.arrayBuffer()),
-      width: dimensions?.width ?? image.width,
-      height: dimensions?.height ?? image.height,
-      imageWidth: image.width,
-      imageHeight: image.height,
-    };
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return await consume(canvas, { width: canvas.width * 72 / 200, height: canvas.height * 72 / 200 });
   } finally {
-    image.close();
+    canvas.width = canvas.height = 0;
   }
 }
 
-export async function compressPdfFile(file, isPdf, signal, onProgress) {
+export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'color') {
   let source;
   try {
     if (isPdf) source = await openPdf(file, signal);
     signal.throwIfAborted();
     const total = source?.document.numPages ?? 1;
-
-    // Keep small original PDFs intact, including their text and links.
-    if (isPdf && file.size < PDF_BYTE_LIMIT) {
-      return { blob: new Blob([file], { type: 'application/pdf' }), pageCount: total };
+    if (isPdf && mode === 'color' && file.size < PDF_BYTE_LIMIT) {
+      return { blob: new Blob([file], { type: 'application/pdf' }), pageCount: total, detail: 'Original quality' };
     }
 
-    // Reserve actual PDF object overhead, plus room for page dimensions and
-    // stream lengths, before dividing the remaining bytes across every page.
-    const skeleton = Array.from({ length: total }, () => ({
-      width: 1, height: 1, imageWidth: 1, imageHeight: 1, bytes: new Uint8Array(),
-    }));
-    const overhead = buildPdf(skeleton).size + total * 256;
-    const budget = Math.floor((PDF_BYTE_LIMIT - overhead - 1) / total);
-    if (budget < 700) throw new Error('This document has too many pages to fit below 198 KB. Try a shorter PDF.');
-
-    const pages = [];
-    for (let number = 1; number <= total; number++) {
-      signal.throwIfAborted();
-      onProgress('Compressing page ' + number + ' of ' + total + '…');
-      let jpeg;
-      let dimensions;
-      if (isPdf) {
-        const page = await source.document.getPage(number);
-        dimensions = page.getViewport({ scale: 1 });
-        jpeg = await renderPdfPage(source.document, number, signal, budget);
-      } else {
-        jpeg = await compressImage(file, budget);
+    if (isPdf && mode === 'color') {
+      onProgress('Optimizing PDF text and graphics…');
+      try {
+        const optimized = await optimizeOriginal(file, signal);
+        if (optimized.size < PDF_BYTE_LIMIT) {
+          return { blob: optimized, pageCount: total, detail: 'Text and graphics preserved' };
+        }
+      } catch (error) {
+        signal.throwIfAborted();
+        // Some PDFs accepted by PDF.js cannot be rewritten by PDF-LIB.
+        // Rendering remains available for those documents.
       }
-      signal.throwIfAborted();
-      pages.push(await jpegPage(jpeg, dimensions));
     }
 
-    const blob = buildPdf(pages);
-    if (blob.size >= PDF_BYTE_LIMIT) {
-      throw new Error('This document could not fit below 198 KB. Try a shorter PDF.');
+    const resolutions = isPdf ? [300, 200] : [200];
+    for (const dpi of resolutions) {
+      const pages = [];
+      for (let number = 1; number <= total; number++) {
+        signal.throwIfAborted();
+        onProgress('Preparing page ' + number + ' of ' + total + ' at ' + dpi + ' dpi…');
+        const consume = (canvas, dimensions) => imagePage(canvas, dimensions, mode, dpi === 300 ? 0.9 : 0.82, signal);
+        const page = isPdf
+          ? await withPdfPage(source.document, number, signal, consume, dpi)
+          : await withImageCanvas(file, signal, consume);
+        signal.throwIfAborted();
+        pages.push(page);
+        if (pages.reduce((sum, item) => sum + item.bytes.length, 0) >= PDF_BYTE_LIMIT) break;
+      }
+      if (pages.length !== total) continue;
+      const blob = buildPdf(pages);
+      if (blob.size < PDF_BYTE_LIMIT) {
+        return { blob, pageCount: total, detail: isPdf ? dpi + ' dpi · ' + (mode === 'monochrome' ? 'Black & white' : 'Color') : 'Image quality preserved' };
+      }
     }
-    return { blob, pageCount: total };
+    const suggestion = mode === 'color'
+      ? 'Try Black & white for scanned text, or upload fewer pages.'
+      : 'Upload fewer pages or use a higher file-size limit at the receiving portal.';
+    throw new Error('This document cannot fit under 198 KB at the supported clarity settings. ' + suggestion);
   } finally {
     if (source) await source.close().catch(() => {});
   }

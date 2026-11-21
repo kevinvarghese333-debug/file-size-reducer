@@ -152,6 +152,24 @@ h1 #output-limit {
   line-height: 1.5;
 }
 
+.pdf-options { margin-top: 16px; }
+.pdf-options label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; }
+.pdf-options select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+.pdf-options select:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
 .intro p {
   max-width: 680px;
   margin-top: 22px;

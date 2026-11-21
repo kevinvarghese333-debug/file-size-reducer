@@ -1,4 +1,4 @@
-import { compressPage } from './compress.mjs?v=3';
+import { compressPage } from './compress.mjs?v=4';
 
 const assets = new URL('./vendor/pdfjs-6.5.438/', import.meta.url);
 
@@ -40,10 +40,18 @@ export async function openPdf(file, signal) {
 }
 
 export async function renderPdfPage(pdf, number, signal, byteLimit) {
+  return withPdfPage(pdf, number, signal, canvas => compressPage(canvas, byteLimit));
+}
+
+export async function withPdfPage(pdf, number, signal, consume, dpi) {
   const page = await pdf.getPage(number);
   signal.throwIfAborted();
   const { width, height } = page.getViewport({ scale: 1 });
-  const viewport = page.getViewport({ scale: Math.min(2.5, 2600 / Math.max(width, height)) });
+  const scale = dpi ? dpi / 72 : Math.min(2.5, 2600 / Math.max(width, height));
+  if (width * height * scale * scale > 24_000_000) {
+    throw new Error('This page is too large to render at the selected document resolution.');
+  }
+  const viewport = page.getViewport({ scale });
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.ceil(viewport.width));
   canvas.height = Math.max(1, Math.ceil(viewport.height));
@@ -53,7 +61,7 @@ export async function renderPdfPage(pdf, number, signal, byteLimit) {
   try {
     await render.promise;
     signal.throwIfAborted();
-    return await compressPage(canvas, byteLimit);
+    return await consume(canvas, { width, height });
   } finally {
     signal.removeEventListener('abort', cancel);
     canvas.width = 0;

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Compress PDFs below 198 KB or convert images and PDF pages to JPEGs under 200 KB. Download individually or as a ZIP.">
   <title>Image Desk — PDFs under 198 KB</title>
-  <link rel="stylesheet" href="styles.css?v=3">
-  <script type="module" src="app.mjs?v=3"></script>
+  <link rel="stylesheet" href="styles.css?v=4">
+  <script type="module" src="app.mjs?v=4"></script>
 </head>
 <body>
   <header class="site-header">
@@ -30,7 +30,14 @@
           <label><input type="radio" name="output-format" value="pdf" checked> PDF · under 198 KB</label>
           <label><input type="radio" name="output-format" value="jpeg"> JPEG · under 200 KB</label>
         </fieldset>
-        <p id="format-help" class="format-help">One PDF per uploaded file, with all pages kept in order. Large PDFs are flattened to images. Fine detail may be reduced to meet the size limit.</p>
+        <div id="pdf-options" class="pdf-options">
+          <label for="pdf-mode">PDF appearance</label>
+          <select id="pdf-mode">
+            <option value="color">Original colors</option>
+            <option value="monochrome">Black &amp; white · scanned text</option>
+          </select>
+        </div>
+        <p id="format-help" class="format-help">PDF text and graphics are optimized first. Scanned pages keep 200 dpi or higher. Choose Black &amp; white for clearer scanned text in a smaller file. This removes colors from scans.</p>
         <div class="dropzone" id="dropzone">
           <div class="drop-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
           <p class="drop-title">Drag and drop images or PDFs here</p>
