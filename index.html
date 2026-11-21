@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Compress PDFs below 198 KB or convert images and PDF pages to JPEGs under 200 KB. Download individually or as a ZIP.">
   <title>Image Desk — PDFs under 198 KB</title>
-  <link rel="stylesheet" href="styles.css?v=4">
-  <script type="module" src="app.mjs?v=4"></script>
+  <link rel="stylesheet" href="styles.css?v=5">
+  <script type="module" src="app.mjs?v=5"></script>
 </head>
 <body>
   <header class="site-header">
@@ -65,6 +65,7 @@
         <ul class="results" id="results" aria-label="Converted files" hidden></ul>
         <div class="results-actions">
           <button id="clear" class="button quiet" type="button" hidden>Clear all</button>
+          <button id="retry" class="button quiet" type="button" hidden>Retry files</button>
           <button id="zip" class="button outline" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m-4-4 4 4 4-4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg><span>Download all (ZIP)</span></button>
         </div>
         <p id="zip-error" class="error" role="alert" hidden></p>

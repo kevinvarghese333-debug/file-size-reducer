@@ -10,6 +10,7 @@ const summary = document.querySelector('#summary');
 const empty = document.querySelector('#empty');
 const results = document.querySelector('#results');
 const clear = document.querySelector('#clear');
+const retry = document.querySelector('#retry');
 const zip = document.querySelector('#zip');
 const zipLabel = zip.querySelector('span');
 const zipError = document.querySelector('#zip-error');
@@ -38,6 +39,10 @@ function refreshControls() {
   results.hidden = entries.length === 0;
   clear.hidden = entries.length === 0;
   clear.disabled = zipping;
+  retry.hidden = counts.failed === 0;
+  retry.disabled = zipping || counts.pending > 0;
+  pdfMode.disabled = zipping;
+  for (const input of formatInputs) input.disabled = zipping;
   zip.disabled = !counts.ready || counts.pending > 0 || zipping;
   zipLabel.textContent = zipping ? 'Preparing ZIP…' : 'Download all (ZIP)';
 
@@ -92,7 +97,10 @@ function showResult(entry, blob) {
 }
 
 function reportFailure(entry, message) {
-  entry.status.textContent = (entry.pageLabel ? entry.pageLabel + ' · ' : '') + message;
+  const mode = entry.outputFormat === 'pdf'
+    ? (entry.pdfMode === 'monochrome' ? 'Black & white' : 'Original colors') : '';
+  const context = entry.pageLabel || mode;
+  entry.status.textContent = (context ? context + ' · ' : '') + message;
   entry.status.classList.add('error');
   counts.failed++;
 }
@@ -196,6 +204,7 @@ function addFiles(files) {
   const rows = document.createDocumentFragment();
   for (const file of files) {
     const entry = createEntry(file.name);
+    entry.sourceFile = file;
     entry.file = file;
     entry.outputFormat = document.querySelector('[name="output-format"]:checked').value;
     entry.pdfMode = pdfMode.value;
@@ -224,8 +233,11 @@ for (const input of formatInputs) {
     formatHelp.textContent = pdf
       ? 'PDF text and graphics are optimized first. Scanned pages keep 200 dpi or higher. Choose Black & white for clearer scanned text in a smaller file. This removes colors from scans.'
       : 'Each PDF page becomes a separate JPEG under 200 KB.';
+    reprocessFiles();
   });
 }
+pdfMode.addEventListener('change', reprocessFiles);
+retry.addEventListener('click', reprocessFiles);
 filesInput.addEventListener('change', () => {
   addFiles(filesInput.files);
   filesInput.value = '';
@@ -257,7 +269,7 @@ dropzone.addEventListener('drop', event => {
   addFiles(event.dataTransfer.files);
 });
 
-clear.addEventListener('click', () => {
+function clearEntries() {
   batch.abort();
   batch = new AbortController();
   for (const entry of entries.flatMap(item => item.pages ?? [item])) {
@@ -269,6 +281,17 @@ clear.addEventListener('click', () => {
   results.replaceChildren();
   zipError.hidden = true;
   refreshControls();
+}
+
+function reprocessFiles() {
+  const files = entries.map(entry => entry.sourceFile);
+  if (!files.length || zipping) return;
+  clearEntries();
+  addFiles(files);
+}
+
+clear.addEventListener('click', () => {
+  clearEntries();
   choose.focus();
 });
 
