@@ -1,4 +1,4 @@
-import { compressPage } from './compress.mjs';
+import { compressPage } from './compress.mjs?v=3';
 
 const assets = new URL('./vendor/pdfjs-6.5.438/', import.meta.url);
 
@@ -39,7 +39,7 @@ export async function openPdf(file, signal) {
   }
 }
 
-export async function renderPdfPage(pdf, number, signal) {
+export async function renderPdfPage(pdf, number, signal, byteLimit) {
   const page = await pdf.getPage(number);
   signal.throwIfAborted();
   const { width, height } = page.getViewport({ scale: 1 });
@@ -53,7 +53,7 @@ export async function renderPdfPage(pdf, number, signal) {
   try {
     await render.promise;
     signal.throwIfAborted();
-    return await compressPage(canvas);
+    return await compressPage(canvas, byteLimit);
   } finally {
     signal.removeEventListener('abort', cancel);
     canvas.width = 0;

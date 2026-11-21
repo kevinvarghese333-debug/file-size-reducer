@@ -1,4 +1,5 @@
-import { BYTE_LIMIT } from './compress.mjs';
+import { BYTE_LIMIT } from './compress.mjs?v=3';
+import { PDF_BYTE_LIMIT } from './pdf-output.mjs?v=3';
 
 const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {
   let value = index;
@@ -14,10 +15,10 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-// JPEGs are already compressed, so ZIP entries use the stored method.
+// Outputs are already compressed, so ZIP entries use the stored method.
 export async function makeZip(entries) {
   const maxOffset = 0xffffffff;
-  if (entries.length >= 0xffff) throw new Error('Choose fewer than 65,535 images per ZIP.');
+  if (entries.length >= 0xffff) throw new Error('Choose fewer than 65,535 files per ZIP.');
   const encoder = new TextEncoder();
   const localParts = [];
   const directoryParts = [];
@@ -25,8 +26,9 @@ export async function makeZip(entries) {
   let directorySize = 0;
 
   for (const { name, blob } of entries) {
-    if (blob.type !== 'image/jpeg' || blob.size >= BYTE_LIMIT) {
-      throw new Error('Every ZIP entry must be a JPEG under 200 KB.');
+    const limit = blob.type === 'application/pdf' ? PDF_BYTE_LIMIT : BYTE_LIMIT;
+    if (!['application/pdf', 'image/jpeg'].includes(blob.type) || blob.size >= limit) {
+      throw new Error('Each PDF must be under 198 KB and each JPEG under 200 KB.');
     }
     const filename = encoder.encode(name);
     const bytes = new Uint8Array(await blob.arrayBuffer());

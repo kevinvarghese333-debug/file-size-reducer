@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Convert images and PDF pages to JPEGs under 200 KB, then download them individually or as a ZIP.">
-  <title>Image Desk — JPEGs under 200 KB</title>
-  <link rel="stylesheet" href="styles.css?v=2">
-  <script type="module" src="app.mjs"></script>
+  <meta name="description" content="Compress PDFs below 198 KB or convert images and PDF pages to JPEGs under 200 KB. Download individually or as a ZIP.">
+  <title>Image Desk — PDFs under 198 KB</title>
+  <link rel="stylesheet" href="styles.css?v=3">
+  <script type="module" src="app.mjs?v=3"></script>
 </head>
 <body>
   <header class="site-header">
@@ -16,15 +16,21 @@
   </header>
   <main class="shell">
     <div class="intro">
-      <h1>Make JPEGs <span>under 200 KB</span></h1>
-      <p>Convert images and PDF pages to JPEGs. Download them one at a time or together in a ZIP.</p>
+      <h1><span id="output-title">Make PDFs </span><span id="output-limit">under 198 KB</span></h1>
+      <p>Compress PDFs or convert images. Choose your output format, then download files individually or together in a ZIP.</p>
     </div>
     <div class="workspace">
       <section class="panel upload-panel" aria-labelledby="upload-title">
         <div class="panel-heading">
           <div class="panel-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></div>
-          <div><h2 id="upload-title">Add files</h2><p>Each PDF page becomes a separate JPEG.</p></div>
+          <div><h2 id="upload-title">Add files</h2><p>Choose files to convert and compress.</p></div>
         </div>
+        <fieldset class="format-picker">
+          <legend>Download format</legend>
+          <label><input type="radio" name="output-format" value="pdf" checked> PDF · under 198 KB</label>
+          <label><input type="radio" name="output-format" value="jpeg"> JPEG · under 200 KB</label>
+        </fieldset>
+        <p id="format-help" class="format-help">One PDF per uploaded file, with all pages kept in order. Large PDFs are flattened to images. Fine detail may be reduced to meet the size limit.</p>
         <div class="dropzone" id="dropzone">
           <div class="drop-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
           <p class="drop-title">Drag and drop images or PDFs here</p>
@@ -37,7 +43,7 @@
       <section class="panel results-panel" aria-labelledby="results-title">
         <div class="panel-heading">
           <div class="panel-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m-4-4 4 4 4-4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></div>
-          <div><h2 id="results-title">Downloads</h2><p id="summary" aria-live="polite">JPEGs will appear here as they’re ready.</p></div>
+          <div><h2 id="results-title">Downloads</h2><p id="summary" aria-live="polite">Converted files will appear here as they’re ready.</p></div>
         </div>
         <div class="empty" id="empty">
           <svg class="empty-art" viewBox="0 0 90 75" aria-hidden="true">

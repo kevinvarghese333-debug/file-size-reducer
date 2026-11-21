@@ -1,6 +1,7 @@
-import { compressImage, uniqueJpegName } from './compress.mjs';
-import { openPdf, renderPdfPage } from './pdf.mjs';
-import { makeZip } from './zip.mjs';
+import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=3';
+import { compressPdfFile } from './pdf-output.mjs?v=3';
+import { openPdf, renderPdfPage } from './pdf.mjs?v=3';
+import { makeZip } from './zip.mjs?v=3';
 
 const choose = document.querySelector('#choose');
 const filesInput = document.querySelector('#files');
@@ -12,6 +13,10 @@ const clear = document.querySelector('#clear');
 const zip = document.querySelector('#zip');
 const zipLabel = zip.querySelector('span');
 const zipError = document.querySelector('#zip-error');
+const formatInputs = document.querySelectorAll('[name="output-format"]');
+const formatHelp = document.querySelector('#format-help');
+const outputTitle = document.querySelector('#output-title');
+const outputLimit = document.querySelector('#output-limit');
 
 const entries = [];
 const usedNames = new Set();
@@ -38,7 +43,7 @@ function refreshControls() {
   if (counts.ready) messages.push(counts.ready + ' ready');
   if (counts.pending) messages.push(counts.pending + ' processing');
   if (counts.failed) messages.push(counts.failed + ' failed');
-  const status = messages.join(' · ') || 'JPEGs will appear here as they’re ready.';
+  const status = messages.join(' · ') || 'Converted files will appear here as they’re ready.';
   if (summary.textContent !== status) summary.textContent = status;
 }
 
@@ -58,14 +63,20 @@ function createEntry(label) {
 function showResult(entry, blob) {
   entry.blob = blob;
   entry.url = URL.createObjectURL(blob);
-  const image = document.createElement('img');
-  image.className = entry.pageLabel ? 'thumb page-thumb' : 'thumb';
-  image.alt = '';
-  image.loading = 'lazy';
-  image.src = entry.url;
-  entry.row.querySelector('.thumb').replaceWith(image);
+  const isPdf = blob.type === 'application/pdf';
+  if (isPdf) {
+    entry.row.querySelector('.thumb').textContent = 'PDF';
+  } else {
+    const image = document.createElement('img');
+    image.className = entry.pageLabel ? 'thumb page-thumb' : 'thumb';
+    image.alt = '';
+    image.loading = 'lazy';
+    image.src = entry.url;
+    entry.row.querySelector('.thumb').replaceWith(image);
+  }
   const prefix = entry.pageLabel ? entry.pageLabel + ' · ' : formatSize(entry.file.size) + ' → ';
-  entry.status.textContent = prefix + formatSize(blob.size) + ' · JPEG';
+  const type = isPdf ? 'PDF · ' + entry.pageCount + (entry.pageCount === 1 ? ' page' : ' pages') : 'JPEG';
+  entry.status.textContent = prefix + formatSize(blob.size) + ' · ' + type;
 
   const link = document.createElement('a');
   link.className = 'button download';
@@ -153,7 +164,15 @@ async function processQueue() {
     while ((entry = entries.find(item => item.file))) {
       try {
         const signal = batch.signal;
-        if (entry.isPdf) {
+        if (entry.outputFormat === 'pdf') {
+          await processOutput(entry, async () => {
+            const result = await compressPdfFile(entry.file, entry.isPdf, signal, message => {
+              if (!signal.aborted) entry.status.textContent = message;
+            });
+            entry.pageCount = result.pageCount;
+            return result.blob;
+          }, signal);
+        } else if (entry.isPdf) {
           await processPdf(entry, signal);
         } else {
           await processOutput(entry, () => compressImage(entry.file), signal);
@@ -174,8 +193,13 @@ function addFiles(files) {
   for (const file of files) {
     const entry = createEntry(file.name);
     entry.file = file;
+    entry.outputFormat = document.querySelector('[name="output-format"]:checked').value;
     entry.isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-    if (!entry.isPdf) entry.name = uniqueJpegName(file.name, usedNames);
+    if (entry.outputFormat === 'pdf') {
+      entry.name = uniqueOutputName(file.name, usedNames, '.pdf', '-compressed');
+    } else if (!entry.isPdf) {
+      entry.name = uniqueJpegName(file.name, usedNames);
+    }
     entries.push(entry);
     rows.append(entry.row);
   }
@@ -186,6 +210,16 @@ function addFiles(files) {
 }
 
 choose.addEventListener('click', () => filesInput.click());
+for (const input of formatInputs) {
+  input.addEventListener('change', () => {
+    const pdf = input.value === 'pdf';
+    outputTitle.textContent = pdf ? 'Make PDFs ' : 'Make JPEGs ';
+    outputLimit.textContent = pdf ? 'under 198 KB' : 'under 200 KB';
+    formatHelp.textContent = pdf
+      ? 'One PDF per uploaded file, with all pages kept in order. Large PDFs are flattened to images. Fine detail may be reduced to meet the size limit.'
+      : 'Each PDF page becomes a separate JPEG under 200 KB.';
+  });
+}
 filesInput.addEventListener('change', () => {
   addFiles(filesInput.files);
   filesInput.value = '';
@@ -242,7 +276,7 @@ zip.addEventListener('click', async () => {
     const url = URL.createObjectURL(archive);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'image-desk-jpegs.zip';
+    link.download = 'image-desk-files.zip';
     document.body.append(link);
     link.click();
     link.remove();

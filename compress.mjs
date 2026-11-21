@@ -24,16 +24,16 @@ function encode(canvas, quality) {
   });
 }
 
-export async function compressImage(file) {
+export async function compressImage(file, byteLimit = BYTE_LIMIT) {
   const image = await loadImage(file);
-  return compressToJpeg(image, image.naturalWidth, image.naturalHeight);
+  return compressToJpeg(image, image.naturalWidth, image.naturalHeight, byteLimit);
 }
 
-export function compressPage(canvas) {
-  return compressToJpeg(canvas, canvas.width, canvas.height);
+export function compressPage(canvas, byteLimit = BYTE_LIMIT) {
+  return compressToJpeg(canvas, canvas.width, canvas.height, byteLimit);
 }
 
-async function compressToJpeg(source, width, height) {
+async function compressToJpeg(source, width, height, byteLimit) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('Image conversion is unavailable in this browser.');
@@ -49,16 +49,16 @@ async function compressToJpeg(source, width, height) {
       ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
 
       const highQuality = await encode(canvas, 0.94);
-      if (highQuality.size < BYTE_LIMIT) return highQuality;
+      if (highQuality.size < byteLimit) return highQuality;
 
       let low = 0.48;
       let high = 0.94;
       let best = await encode(canvas, low);
-      if (best.size < BYTE_LIMIT) {
+      if (best.size < byteLimit) {
         for (let step = 0; step < 6; step++) {
           const quality = (low + high) / 2;
           const candidate = await encode(canvas, quality);
-          if (candidate.size < BYTE_LIMIT) {
+          if (candidate.size < byteLimit) {
             best = candidate;
             low = quality;
           } else {
@@ -69,9 +69,9 @@ async function compressToJpeg(source, width, height) {
       }
 
       if (canvas.width === 1 && canvas.height === 1) break;
-      scale *= Math.min(0.85, 0.95 * Math.sqrt(BYTE_LIMIT / best.size));
+      scale *= Math.min(0.85, 0.95 * Math.sqrt(byteLimit / best.size));
     }
-    throw new Error('This image could not be compressed under 200 KB.');
+    throw new Error('This image could not fit within the required file size.');
   } finally {
     canvas.width = 0;
     canvas.height = 0;
@@ -79,6 +79,10 @@ async function compressToJpeg(source, width, height) {
 }
 
 export function uniqueJpegName(original, usedNames, suffix = '') {
+  return uniqueOutputName(original, usedNames, '.jpg', suffix);
+}
+
+export function uniqueOutputName(original, usedNames, extension, suffix = '') {
   const clean = original.normalize('NFC')
     .replace(/\.[^.]+$/, '')
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
@@ -86,10 +90,10 @@ export function uniqueJpegName(original, usedNames, suffix = '') {
   let stem = Array.from(clean).slice(0, 90).join('') || 'image';
   if (/^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/i.test(stem)) stem = '_' + stem;
   stem += suffix;
-  let name = stem + '.jpg';
+  let name = stem + extension;
   let index = 2;
   while (usedNames.has(name.toLowerCase())) {
-    name = stem + '-' + index + '.jpg';
+    name = stem + '-' + index + extension;
     index++;
   }
   usedNames.add(name.toLowerCase());
