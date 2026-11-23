@@ -1,8 +1,8 @@
-import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=9';
-import { compressPdfFile, MAX_PDF_PARTS, PDF_BYTE_LIMIT } from './pdf-output.mjs?v=9';
-import { openPdf, renderPdfPage } from './pdf.mjs?v=9';
-import { makeZip } from './zip.mjs?v=9';
-import { startDiagnosticJob, diagnosticLogBlob } from './diagnostics.mjs?v=9';
+import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=10';
+import { compressPdfFile, MAX_PDF_PARTS, PDF_BYTE_LIMIT } from './pdf-output.mjs?v=10';
+import { openPdf, renderPdfPage } from './pdf.mjs?v=10';
+import { makeZip } from './zip.mjs?v=10';
+import { startDiagnosticJob, diagnosticLogBlob } from './diagnostics.mjs?v=10';
 
 const choose = document.querySelector('#choose');
 const filesInput = document.querySelector('#files');
@@ -25,7 +25,7 @@ const downloadLogs = document.querySelector('#download-logs');
 
 const entries = [];
 const usedNames = new Set();
-const counts = { pending: 0, ready: 0, failed: 0 };
+const counts = { pending: 0, ready: 0, failed: 0, awaiting: 0, skipped: 0 };
 const sizeFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
 let processing = false;
 let zipping = false;
@@ -45,12 +45,14 @@ function refreshControls() {
   retry.disabled = zipping || counts.pending > 0;
   pdfMode.disabled = zipping;
   for (const input of formatInputs) input.disabled = zipping;
-  zip.disabled = !counts.ready || counts.pending > 0 || zipping;
+  zip.disabled = !counts.ready || counts.pending > 0 || counts.awaiting > 0 || zipping;
   zipLabel.textContent = zipping ? 'Preparing ZIP…' : 'Download all (ZIP)';
 
   const messages = [];
   if (counts.ready) messages.push(counts.ready + ' ready');
   if (counts.pending) messages.push(counts.pending + ' processing');
+  if (counts.awaiting) messages.push(counts.awaiting + ' awaiting decision');
+  if (counts.skipped) messages.push(counts.skipped + ' skipped');
   if (counts.failed) messages.push(counts.failed + ' failed');
   const status = messages.join(' · ') || 'Converted files will appear here as they’re ready.';
   if (summary.textContent !== status) summary.textContent = status;
@@ -190,6 +192,90 @@ async function processPdf(entry, signal) {
   }
 }
 
+function presentPdfResult(entry, result) {
+  if (result.parts.length === 1) {
+    entry.pageCount = result.pageCount;
+    entry.detail = result.parts[0].detail + ' · Output checks passed';
+    showResult(entry, result.parts[0].blob);
+  } else {
+    const rows = document.createDocumentFragment();
+    const digits = String(result.pageCount).length;
+    const partDigits = Math.max(2, String(result.parts.length).length);
+    entry.pages = result.parts.map((part, index) => {
+      const start = String(part.pageStart).padStart(digits, '0');
+      const end = String(part.pageEnd).padStart(digits, '0');
+      const suffix = '-part-' + String(index + 1).padStart(partDigits, '0') + '-of-' +
+        String(result.parts.length).padStart(partDigits, '0') + '-pages-' + start + '-' + end;
+      const name = uniqueOutputName(entry.sourceFile.name, usedNames, '.pdf', suffix);
+      const output = createEntry(name);
+      output.name = name;
+      output.pageLabel = 'Part ' + (index + 1) + ' of ' + result.parts.length +
+        ' · Pages ' + part.pageStart + '–' + part.pageEnd;
+      output.pageCount = part.pageEnd - part.pageStart + 1;
+      output.detail = part.detail + ' · Output checks passed';
+      showResult(output, part.blob);
+      rows.append(output.row);
+      return output;
+    });
+    entry.row.replaceWith(rows);
+  }
+  counts.ready += result.parts.length;
+  entry.log.finish('completed', { pageCount: result.pageCount, partCount: result.parts.length,
+    outputs: result.parts.map((part, index) => ({
+      name: entry.pages ? entry.pages[index].name : entry.name,
+      pageStart: part.pageStart, pageEnd: part.pageEnd, bytes: part.blob.size,
+      detail: part.detail, detailRetention: part.detailRetention,
+    })) });
+}
+
+function requestPdfApproval(entry, result, signal) {
+  entry.pendingResult = result;
+  counts.awaiting++;
+  const count = result.parts.length;
+  entry.status.textContent = count + ' PDFs are needed at the checked settings, each below 200 KB. This exceeds the default of 4. Proceed?';
+  entry.log.record('approval_requested', { partCount: count, pageCount: result.pageCount,
+    parts: result.parts.map(part => ({ pageStart: part.pageStart, pageEnd: part.pageEnd, bytes: part.blob.size })) });
+  const proposal = document.createElement('div');
+  proposal.className = 'pdf-approval';
+  const list = document.createElement('ol');
+  for (const part of result.parts) {
+    const item = document.createElement('li');
+    item.textContent = 'Pages ' + part.pageStart + '–' + part.pageEnd + ' · ' + formatSize(part.blob.size);
+    list.append(item);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'approval-actions';
+  const proceed = document.createElement('button');
+  proceed.className = 'button primary';
+  proceed.type = 'button';
+  proceed.textContent = 'Proceed with ' + count + ' PDFs';
+  const cancel = document.createElement('button');
+  cancel.className = 'button outline';
+  cancel.type = 'button';
+  cancel.textContent = 'Cancel';
+  function decide(approved) {
+    if (signal.aborted || !entry.pendingResult) return;
+    entry.pendingResult = null;
+    counts.awaiting--;
+    proposal.remove();
+    if (approved) {
+      entry.log.record('approval_accepted', { partCount: count });
+      presentPdfResult(entry, result);
+    } else {
+      counts.skipped++;
+      entry.status.textContent = 'Cancelled. No files were made available.';
+      entry.log.record('approval_declined', { partCount: count });
+      entry.log.finish('declined', { proposedPartCount: count });
+    }
+    refreshControls();
+  }
+  proceed.addEventListener('click', () => decide(true));
+  cancel.addEventListener('click', () => decide(false));
+  actions.append(proceed, cancel);
+  proposal.append(list, actions);
+  entry.row.querySelector('.file-info').append(proposal);
+}
+
 async function processPdfDownloads(entry, signal) {
   try {
     const result = await compressPdfFile(entry.file, entry.isPdf, signal, message => {
@@ -197,39 +283,8 @@ async function processPdfDownloads(entry, signal) {
     }, entry.pdfMode, entry.log.record);
     if (signal.aborted) return;
 
-    if (result.parts.length === 1) {
-      entry.pageCount = result.pageCount;
-      entry.detail = result.parts[0].detail + ' · Output checks passed';
-      showResult(entry, result.parts[0].blob);
-    } else {
-      const rows = document.createDocumentFragment();
-      const digits = String(result.pageCount).length;
-      const partDigits = Math.max(2, String(result.parts.length).length);
-      entry.pages = result.parts.map((part, index) => {
-        const start = String(part.pageStart).padStart(digits, '0');
-        const end = String(part.pageEnd).padStart(digits, '0');
-        const suffix = '-part-' + String(index + 1).padStart(partDigits, '0') + '-of-' +
-          String(result.parts.length).padStart(partDigits, '0') + '-pages-' + start + '-' + end;
-        const name = uniqueOutputName(entry.sourceFile.name, usedNames, '.pdf', suffix);
-        const output = createEntry(name);
-        output.name = name;
-        output.pageLabel = 'Part ' + (index + 1) + ' of ' + result.parts.length +
-          ' · Pages ' + part.pageStart + '–' + part.pageEnd;
-        output.pageCount = part.pageEnd - part.pageStart + 1;
-        output.detail = part.detail + ' · Output checks passed';
-        showResult(output, part.blob);
-        rows.append(output.row);
-        return output;
-      });
-      entry.row.replaceWith(rows);
-    }
-    counts.ready += result.parts.length;
-    entry.log.finish('completed', { pageCount: result.pageCount, partCount: result.parts.length,
-      outputs: result.parts.map((part, index) => ({
-        name: entry.pages ? entry.pages[index].name : entry.name,
-        pageStart: part.pageStart, pageEnd: part.pageEnd, bytes: part.blob.size,
-        detail: part.detail, detailRetention: part.detailRetention,
-      })) });
+    if (result.requiresApproval) requestPdfApproval(entry, result, signal);
+    else presentPdfResult(entry, result);
   } catch (error) {
     if (!signal.aborted) reportFailure(entry, error.message || 'This PDF could not be prepared.');
   } finally {
@@ -299,7 +354,7 @@ for (const input of formatInputs) {
     outputLimit.textContent = 'under 200 KB';
     pdfOptions.hidden = !pdf;
     formatHelp.textContent = pdf
-      ? 'Automatic analyzes each page and may use black & white for text scans. It tries 150 dpi when needed and combines pages into as few PDFs as possible, up to 4, each below 200 KB. Conversion stops if size and detail checks cannot be met. Preview handwriting and stamps before use.'
+      ? 'Automatic analyzes each page and may use black & white for text scans. It tries 150 dpi when needed and combines pages into as few PDFs as possible, each below 200 KB. If more than 4 are needed, it shows the checked file count and asks you to proceed or cancel. Conversion stops if size and detail checks cannot be met. Preview handwriting and stamps before use.'
       : 'Each PDF page becomes a separate JPEG under 200 KB.';
     reprocessFiles();
   });
@@ -340,13 +395,16 @@ dropzone.addEventListener('drop', event => {
 function clearEntries() {
   batch.abort();
   batch = new AbortController();
-  for (const entry of entries) entry.log.finish('cancelled', { reason: 'Files cleared or settings changed' });
+  for (const entry of entries) {
+    entry.pendingResult = null;
+    entry.log.finish('cancelled', { reason: 'Files cleared or settings changed' });
+  }
   for (const entry of entries.flatMap(item => item.pages ?? [item])) {
     if (entry.url) URL.revokeObjectURL(entry.url);
   }
   entries.length = 0;
   usedNames.clear();
-  counts.pending = counts.ready = counts.failed = 0;
+  counts.pending = counts.ready = counts.failed = counts.awaiting = counts.skipped = 0;
   results.replaceChildren();
   zipError.hidden = true;
   refreshControls();

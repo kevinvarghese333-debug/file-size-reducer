@@ -1,5 +1,5 @@
-import { BYTE_LIMIT } from './compress.mjs?v=9';
-import { PDF_BYTE_LIMIT } from './pdf-output.mjs?v=9';
+import { BYTE_LIMIT } from './compress.mjs?v=10';
+import { PDF_BYTE_LIMIT } from './pdf-output.mjs?v=10';
 
 const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {
   let value = index;

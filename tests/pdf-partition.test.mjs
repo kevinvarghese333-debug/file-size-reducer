@@ -47,3 +47,12 @@ test('honors cancellation', async () => {
   const controller = new AbortController(); controller.abort();
   await assert.rejects(partitionPdf(1, async () => new Blob(), controller.signal), { name: 'AbortError' });
 });
+
+
+test('calculates an overflow count only when explicitly requested', async () => {
+  const parts = await partitionPdf(7, async (start, end) => new Blob([
+    new Uint8Array(600 + (end - start + 1) * 110_000),
+  ], { type: 'application/pdf' }), new AbortController().signal, Infinity);
+  assert.equal(parts.length, 7);
+  assert.ok(parts.every(part => part.blob.size < PDF_BYTE_LIMIT));
+});

@@ -431,3 +431,8 @@ h2 {
 @media (prefers-reduced-motion: reduce) {
   .dropzone { transition: none; }
 }
+
+.pdf-approval { margin-top: 12px; }
+.pdf-approval ol { padding-left: 20px; max-height: 180px; overflow-y: auto; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.approval-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.approval-actions .button { font-size: 13px; padding: 10px 14px; margin-left: 0; }

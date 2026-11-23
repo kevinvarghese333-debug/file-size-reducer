@@ -28,7 +28,7 @@ function persist() {
 export function startDiagnosticJob(file, settings) {
   const job = {
     id: crypto.randomUUID(),
-    appVersion: '9',
+    appVersion: '10',
     startedAt: new Date().toISOString(),
     status: 'queued',
     input: { name: file.name, bytes: file.size, type: file.type },
@@ -43,7 +43,7 @@ export function startDiagnosticJob(file, settings) {
     id: job.id,
     record(event, details = {}) {
       if (finished) return;
-      job.status = 'processing';
+      job.status = event === 'approval_requested' ? 'awaiting_confirmation' : 'processing';
       job.events.push({ at: new Date().toISOString(), event, ...details });
       if (job.events.length > maxEvents) {
         job.events.shift();

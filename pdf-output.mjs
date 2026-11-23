@@ -1,8 +1,8 @@
-import { loadImage } from './compress.mjs?v=9';
-import { openPdf, withPdfPage } from './pdf.mjs?v=9';
+import { loadImage } from './compress.mjs?v=10';
+import { openPdf, withPdfPage } from './pdf.mjs?v=10';
 import { encodeCcittFax } from './vendor/pdf-codec-5.9.0/image/ccitt-encode.js';
-import { checkPdfParts } from './pdf-check.mjs?v=9';
-import { analyzeCanvas, otsuThreshold } from './page-analysis.mjs?v=9';
+import { checkPdfParts } from './pdf-check.mjs?v=10';
+import { analyzeCanvas, otsuThreshold } from './page-analysis.mjs?v=10';
 
 export const PDF_BYTE_LIMIT = 200_000;
 export const MAX_PDF_PARTS = 4;
@@ -72,9 +72,9 @@ async function optimizeOriginal(file, signal) {
   return { blob: new Blob([bytes], { type: 'application/pdf' }), document: pdf };
 }
 
-// Pack consecutive pages into at most four parts based on actual PDF bytes.
+// Pack consecutive pages using actual PDF bytes; callers can request an overflow proposal.
 // Oversized candidates retain only their size to avoid caching large PDF buffers.
-export async function partitionPdf(total, encodeRange, signal) {
+export async function partitionPdf(total, encodeRange, signal, maximumParts = MAX_PDF_PARTS) {
   const cache = new Map();
   async function encode(start, end) {
     signal.throwIfAborted();
@@ -106,7 +106,7 @@ export async function partitionPdf(total, encodeRange, signal) {
     }
     parts.push(best);
     start = best.pageEnd + 1;
-    if (parts.length === MAX_PDF_PARTS && start <= total) return null;
+    if (parts.length === maximumParts && start <= total) return null;
   }
 
   // Prefer even ranges when they fit without increasing the part count.
@@ -222,18 +222,18 @@ async function withImageCanvas(file, signal, consume) {
 }
 
 async function checkedResult(parts, source, total, signal, onProgress, record) {
-  await checkPdfParts(parts, source, signal, onProgress, record);
+  await checkPdfParts(parts, source, signal, onProgress, record, Infinity);
   signal.throwIfAborted();
   record('candidate_verified', { partCount: parts.length, pageCount: total,
     parts: parts.map(part => ({ pageStart: part.pageStart, pageEnd: part.pageEnd,
       bytes: part.blob.size, detail: part.detail, detailRetention: part.detailRetention })) });
-  return { parts, pageCount: total, blob: parts.length === 1 ? parts[0].blob : undefined,
+  return { parts, pageCount: total, requiresApproval: parts.length > MAX_PDF_PARTS, blob: parts.length === 1 ? parts[0].blob : undefined,
     detail: parts[0].detail };
 }
 
 function limitError(reason) {
-  const error = new Error(reason + ' The document could not meet the readability checks within 4 PDFs below 200 KB each. Download logs for the page-by-page diagnosis.');
-  error.code = 'PDF_FOUR_PART_LIMIT';
+  const error = new Error(reason + ' No output passed both the 200 KB per-file limit and the detail checks. More files alone could not resolve this. Download logs for the page-by-page diagnosis.');
+  error.code = 'PDF_SIZE_QUALITY_LIMIT';
   return error;
 }
 
@@ -290,7 +290,7 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
         const parts = [{ blob: optimized.blob, pageStart: 1, pageEnd: total, detail: 'Text and graphics preserved' }];
         return await checkedResult(parts, source.document, total, signal, onProgress, record);
       }
-      if (optimized && optimized.blob.size < PDF_BYTE_LIMIT * MAX_PDF_PARTS) {
+      if (optimized) {
         const { PDFDocument } = await import('./vendor/pdf-lib-1.17.1/pdf-lib.min.mjs');
         const parts = await partitionPdf(total, async (start, end) => {
           const pdf = await PDFDocument.create();
@@ -299,8 +299,8 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
           for (const page of pages) pdf.addPage(page);
           return new Blob([await pdf.save({ useObjectStreams: true, updateFieldAppearances: false })],
             { type: 'application/pdf' });
-        }, signal);
-        record('lossless_partition', { fitsFourParts: Boolean(parts) });
+        }, signal, Infinity);
+        record('lossless_partition', { fitsFourParts: Boolean(parts && parts.length <= MAX_PDF_PARTS), partCount: parts?.length });
         if (parts) {
           for (const part of parts) part.detail = 'Text and graphics preserved';
           best = await checkedResult(parts, source.document, total, signal, onProgress, record);
@@ -349,19 +349,19 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
           encodedImageBytes: page.bytes.length,
           estimatedTextPixels: analysis.estimatedTextHeight
             ? Number((analysis.estimatedTextHeight * dpi / analysis.referenceDpi).toFixed(2)) : null });
-        if (bytes >= PDF_BYTE_LIMIT * MAX_PDF_PARTS || buildPdf([page]).size >= PDF_BYTE_LIMIT) break;
+        if (buildPdf([page]).size >= PDF_BYTE_LIMIT) break;
       }
-      if (pages.length !== total || bytes >= PDF_BYTE_LIMIT * MAX_PDF_PARTS) {
-        lastFailure = 'The pages still exceed the combined four-file budget at the tried resolution of ' + profile.dpi + ' dpi.';
+      if (pages.length !== total) {
+        lastFailure = 'A page still exceeds 200 KB at the tried resolution of ' + profile.dpi + ' dpi.';
         record('attempt_rejected', { reason: 'byte_budget', preparedPages: pages.length, encodedImageBytes: bytes });
         continue;
       }
-      onProgress('Balancing pages across up to 4 PDFs…');
-      const parts = await partitionPdf(total, (start, end) => buildPdf(pages.slice(start - 1, end)), signal);
-      record('partition_attempt', { encodedImageBytes: bytes, fitsFourParts: Boolean(parts),
+      onProgress('Finding the fewest PDF parts that fit…');
+      const parts = await partitionPdf(total, (start, end) => buildPdf(pages.slice(start - 1, end)), signal, Infinity);
+      record('partition_attempt', { encodedImageBytes: bytes, fitsFourParts: Boolean(parts && parts.length <= MAX_PDF_PARTS), partCount: parts?.length,
         ranges: parts?.map(part => [part.pageStart, part.pageEnd]), sizes: parts?.map(part => part.blob.size) });
       if (!parts) {
-        lastFailure = 'The page sizes still require more than 4 files, or a single page exceeds 200 KB, at the tried resolution of ' + profile.dpi + ' dpi.';
+        lastFailure = 'A page still exceeds 200 KB at the tried resolution of ' + profile.dpi + ' dpi.';
         continue;
       }
       if (best && parts.length >= best.parts.length) {

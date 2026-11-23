@@ -1,4 +1,4 @@
-import { openPdf, withPdfPage } from './pdf.mjs?v=9';
+import { openPdf, withPdfPage } from './pdf.mjs?v=10';
 
 function grayPixels(canvas) {
   const rgba = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
@@ -42,9 +42,9 @@ export function retainedDetail(reference, output) {
   return total ? retained / total : 1;
 }
 
-export async function checkPdfParts(parts, source, signal, onProgress, record = () => {}) {
-  if (!parts.length || parts.length > 4) {
-    throw new Error('The output must contain between 1 and 4 PDFs.');
+export async function checkPdfParts(parts, source, signal, onProgress, record = () => {}, maximumParts = 4) {
+  if (!parts.length || parts.length > maximumParts) {
+    throw new Error('The output must contain between 1 and ' + maximumParts + ' PDFs.');
   }
   let expectedPage = 1;
   for (const part of parts) {
