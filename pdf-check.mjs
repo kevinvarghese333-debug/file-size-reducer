@@ -1,4 +1,4 @@
-import { openPdf, withPdfPage } from './pdf.mjs?v=8';
+import { openPdf, withPdfPage } from './pdf.mjs?v=9';
 
 function grayPixels(canvas) {
   const rgba = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
@@ -42,10 +42,13 @@ export function retainedDetail(reference, output) {
   return total ? retained / total : 1;
 }
 
-export async function checkPdfParts(parts, source, signal, onProgress) {
+export async function checkPdfParts(parts, source, signal, onProgress, record = () => {}) {
+  if (!parts.length || parts.length > 4) {
+    throw new Error('The output must contain between 1 and 4 PDFs.');
+  }
   let expectedPage = 1;
   for (const part of parts) {
-    if (part.blob.type !== 'application/pdf' || part.blob.size >= 198_000 ||
+    if (part.blob.type !== 'application/pdf' || part.blob.size >= 200_000 ||
         part.pageStart !== expectedPage || part.pageEnd < part.pageStart) {
       throw new Error('The generated PDF failed its file-size or page-order check.');
     }
@@ -71,14 +74,23 @@ export async function checkPdfParts(parts, source, signal, onProgress) {
           }
           const reference = await withPdfPage(source, sourceNumber, signal, grayPixels, dpi);
           const retention = retainedDetail(reference, decoded);
-          if (retention < 0.85) {
-            throw new Error('Page ' + sourceNumber + ' lost too much image detail. Choose a different PDF appearance or use a clearer source scan.');
+          record('page_quality_check', {
+            page: sourceNumber, detailRetention: Number(retention.toFixed(4)),
+            passed: retention >= 0.92, referenceWidth: reference.width, referenceHeight: reference.height,
+          });
+          if (retention < 0.92) {
+            const error = new Error('Page ' + sourceNumber + ' lost too much image detail at the required size.');
+            error.code = 'PDF_DETAIL_LOSS';
+            error.pageNumber = sourceNumber;
+            throw error;
           }
           lowestRetention = Math.min(lowestRetention, retention);
         }
       }
       part.checked = true;
       part.detailRetention = lowestRetention;
+      record('part_checked', { pageStart: part.pageStart, pageEnd: part.pageEnd,
+        bytes: part.blob.size, detailRetention: Number(lowestRetention.toFixed(4)) });
       expectedPage = part.pageEnd + 1;
     } finally {
       await output.close().catch(() => {});

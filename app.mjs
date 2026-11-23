@@ -1,7 +1,8 @@
-import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=8';
-import { compressPdfFile } from './pdf-output.mjs?v=8';
-import { openPdf, renderPdfPage } from './pdf.mjs?v=8';
-import { makeZip } from './zip.mjs?v=8';
+import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=9';
+import { compressPdfFile, MAX_PDF_PARTS, PDF_BYTE_LIMIT } from './pdf-output.mjs?v=9';
+import { openPdf, renderPdfPage } from './pdf.mjs?v=9';
+import { makeZip } from './zip.mjs?v=9';
+import { startDiagnosticJob, diagnosticLogBlob } from './diagnostics.mjs?v=9';
 
 const choose = document.querySelector('#choose');
 const filesInput = document.querySelector('#files');
@@ -20,6 +21,7 @@ const outputTitle = document.querySelector('#output-title');
 const outputLimit = document.querySelector('#output-limit');
 const pdfOptions = document.querySelector('#pdf-options');
 const pdfMode = document.querySelector('#pdf-mode');
+const downloadLogs = document.querySelector('#download-logs');
 
 const entries = [];
 const usedNames = new Set();
@@ -108,11 +110,13 @@ function showResult(entry, blob) {
 
 function reportFailure(entry, message) {
   const mode = entry.outputFormat === 'pdf'
-    ? (entry.pdfMode === 'monochrome' ? 'Black & white' : 'Original colors') : '';
+    ? ({ auto: 'Automatic', monochrome: 'Black & white', color: 'Original colors' }[entry.pdfMode]) : '';
   const context = entry.pageLabel || mode;
   entry.status.textContent = (context ? context + ' · ' : '') + message;
   entry.status.classList.add('error');
   counts.failed++;
+  entry.log?.record('output_failed', { page: entry.pageNumber, reason: message });
+  if (entry.sourceFile) entry.log.finish('failed', { reason: message });
 }
 
 async function processOutput(entry, convert, signal, errorMessage) {
@@ -122,6 +126,8 @@ async function processOutput(entry, convert, signal, errorMessage) {
     if (signal.aborted) return;
     showResult(entry, blob);
     counts.ready++;
+    entry.log?.record('jpeg_ready', { page: entry.pageNumber || 1, bytes: blob.size });
+    if (entry.sourceFile) entry.log.finish('completed', { outputs: [{ name: entry.name, bytes: blob.size }] });
   } catch (error) {
     if (signal.aborted) return;
     reportFailure(entry, errorMessage || error.message || 'This file could not be compressed.');
@@ -158,6 +164,8 @@ async function processPdf(entry, signal) {
       const name = uniqueJpegName(entry.file.name, usedNames, suffix);
       const page = createEntry(name);
       page.name = name;
+      page.pageNumber = number;
+      page.log = entry.log;
       page.pageLabel = 'Page ' + number + ' of ' + total;
       page.status.textContent = page.pageLabel + ' · Waiting…';
       rows.append(page.row);
@@ -174,6 +182,11 @@ async function processPdf(entry, signal) {
     }
   } finally {
     await pdf.close().catch(() => {});
+    if (!signal.aborted) {
+      entry.log.finish(entry.pages?.some(page => !page.blob) ? 'partial' : 'completed', {
+        outputs: (entry.pages || []).filter(page => page.blob).map(page => ({ name: page.name, bytes: page.blob.size })),
+      });
+    }
   }
 }
 
@@ -181,7 +194,7 @@ async function processPdfDownloads(entry, signal) {
   try {
     const result = await compressPdfFile(entry.file, entry.isPdf, signal, message => {
       if (!signal.aborted) entry.status.textContent = message;
-    }, entry.pdfMode);
+    }, entry.pdfMode, entry.log.record);
     if (signal.aborted) return;
 
     if (result.parts.length === 1) {
@@ -211,6 +224,12 @@ async function processPdfDownloads(entry, signal) {
       entry.row.replaceWith(rows);
     }
     counts.ready += result.parts.length;
+    entry.log.finish('completed', { pageCount: result.pageCount, partCount: result.parts.length,
+      outputs: result.parts.map((part, index) => ({
+        name: entry.pages ? entry.pages[index].name : entry.name,
+        pageStart: part.pageStart, pageEnd: part.pageEnd, bytes: part.blob.size,
+        detail: part.detail, detailRetention: part.detailRetention,
+      })) });
   } catch (error) {
     if (!signal.aborted) reportFailure(entry, error.message || 'This PDF could not be prepared.');
   } finally {
@@ -255,6 +274,8 @@ function addFiles(files) {
     entry.file = file;
     entry.outputFormat = document.querySelector('[name="output-format"]:checked').value;
     entry.pdfMode = pdfMode.value;
+    entry.log = startDiagnosticJob(file, { format: entry.outputFormat, appearance: entry.pdfMode,
+      maximumPdfParts: MAX_PDF_PARTS, maximumPdfBytes: PDF_BYTE_LIMIT });
     entry.isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
     if (entry.outputFormat === 'pdf') {
       entry.name = uniqueOutputName(file.name, usedNames, '.pdf', '-compressed');
@@ -275,10 +296,10 @@ for (const input of formatInputs) {
   input.addEventListener('change', () => {
     const pdf = input.value === 'pdf';
     outputTitle.textContent = pdf ? 'Make PDFs ' : 'Make JPEGs ';
-    outputLimit.textContent = pdf ? 'under 198 KB' : 'under 200 KB';
+    outputLimit.textContent = 'under 200 KB';
     pdfOptions.hidden = !pdf;
     formatHelp.textContent = pdf
-      ? 'PDFs are checked for size, page order, rendering and image detail. Large files split into as many numbered PDF parts as needed, each under 198 KB. Preview handwriting and stamps before use. Black & white removes scan colors.'
+      ? 'Automatic analyzes each page and may use black & white for text scans. It tries 150 dpi when needed and combines pages into as few PDFs as possible, up to 4, each below 200 KB. Conversion stops if size and detail checks cannot be met. Preview handwriting and stamps before use.'
       : 'Each PDF page becomes a separate JPEG under 200 KB.';
     reprocessFiles();
   });
@@ -319,6 +340,7 @@ dropzone.addEventListener('drop', event => {
 function clearEntries() {
   batch.abort();
   batch = new AbortController();
+  for (const entry of entries) entry.log.finish('cancelled', { reason: 'Files cleared or settings changed' });
   for (const entry of entries.flatMap(item => item.pages ?? [item])) {
     if (entry.url) URL.revokeObjectURL(entry.url);
   }
@@ -340,6 +362,17 @@ function reprocessFiles() {
 clear.addEventListener('click', () => {
   clearEntries();
   choose.focus();
+});
+
+downloadLogs.addEventListener('click', () => {
+  const url = URL.createObjectURL(diagnosticLogBlob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'image-desk-diagnostics-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 });
 
 zip.addEventListener('click', async () => {
