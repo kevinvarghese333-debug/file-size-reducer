@@ -1,7 +1,7 @@
-import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=6';
-import { compressPdfFile } from './pdf-output.mjs?v=6';
-import { openPdf, renderPdfPage } from './pdf.mjs?v=6';
-import { makeZip } from './zip.mjs?v=6';
+import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=7';
+import { compressPdfFile } from './pdf-output.mjs?v=7';
+import { openPdf, renderPdfPage } from './pdf.mjs?v=7';
+import { makeZip } from './zip.mjs?v=7';
 
 const choose = document.querySelector('#choose');
 const filesInput = document.querySelector('#files');
@@ -93,6 +93,16 @@ function showResult(entry, blob) {
   link.title = 'Download ' + entry.name;
   link.setAttribute('aria-label', link.title);
   link.append(zip.querySelector('svg').cloneNode(true));
+  if (isPdf) {
+    const preview = document.createElement('a');
+    preview.className = 'button preview';
+    preview.href = entry.url;
+    preview.target = '_blank';
+    preview.rel = 'noopener';
+    preview.textContent = 'Preview';
+    preview.setAttribute('aria-label', 'Preview ' + entry.name);
+    entry.row.append(preview);
+  }
   entry.row.append(link);
 }
 
@@ -167,6 +177,49 @@ async function processPdf(entry, signal) {
   }
 }
 
+async function processPdfDownloads(entry, signal) {
+  try {
+    const result = await compressPdfFile(entry.file, entry.isPdf, signal, message => {
+      if (!signal.aborted) entry.status.textContent = message;
+    }, entry.pdfMode);
+    if (signal.aborted) return;
+
+    if (result.parts.length === 1) {
+      entry.pageCount = result.pageCount;
+      entry.detail = result.parts[0].detail + ' · Output checks passed';
+      showResult(entry, result.parts[0].blob);
+    } else {
+      const rows = document.createDocumentFragment();
+      const digits = String(result.pageCount).length;
+      entry.pages = result.parts.map((part, index) => {
+        const start = String(part.pageStart).padStart(digits, '0');
+        const end = String(part.pageEnd).padStart(digits, '0');
+        const suffix = '-part-' + String(index + 1).padStart(2, '0') + '-of-' +
+          String(result.parts.length).padStart(2, '0') + '-pages-' + start + '-' + end;
+        const name = uniqueOutputName(entry.sourceFile.name, usedNames, '.pdf', suffix);
+        const output = createEntry(name);
+        output.name = name;
+        output.pageLabel = 'Part ' + (index + 1) + ' of ' + result.parts.length +
+          ' · Pages ' + part.pageStart + '–' + part.pageEnd;
+        output.pageCount = part.pageEnd - part.pageStart + 1;
+        output.detail = part.detail + ' · Output checks passed';
+        showResult(output, part.blob);
+        rows.append(output.row);
+        return output;
+      });
+      entry.row.replaceWith(rows);
+    }
+    counts.ready += result.parts.length;
+  } catch (error) {
+    if (!signal.aborted) reportFailure(entry, error.message || 'This PDF could not be prepared.');
+  } finally {
+    if (!signal.aborted) {
+      counts.pending--;
+      refreshControls();
+    }
+  }
+}
+
 async function processQueue() {
   if (processing) return;
   processing = true;
@@ -176,14 +229,7 @@ async function processQueue() {
       try {
         const signal = batch.signal;
         if (entry.outputFormat === 'pdf') {
-          await processOutput(entry, async () => {
-            const result = await compressPdfFile(entry.file, entry.isPdf, signal, message => {
-              if (!signal.aborted) entry.status.textContent = message;
-            }, entry.pdfMode);
-            entry.pageCount = result.pageCount;
-            entry.detail = result.detail;
-            return result.blob;
-          }, signal);
+          await processPdfDownloads(entry, signal);
         } else if (entry.isPdf) {
           await processPdf(entry, signal);
         } else {
@@ -231,7 +277,7 @@ for (const input of formatInputs) {
     outputLimit.textContent = pdf ? 'under 198 KB' : 'under 200 KB';
     pdfOptions.hidden = !pdf;
     formatHelp.textContent = pdf
-      ? 'Original colors optimizes PDF text and graphics first. Black & white adapts scan resolution to fit 198 KB and removes scan colors. Check small text and faint handwriting in the download.'
+      ? 'PDFs are checked for size, page order, rendering and image detail. Large files split into up to 3 numbered PDFs under 198 KB each. Preview handwriting and stamps before use. Black & white removes scan colors.'
       : 'Each PDF page becomes a separate JPEG under 200 KB.';
     reprocessFiles();
   });

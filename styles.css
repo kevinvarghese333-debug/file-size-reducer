@@ -398,6 +398,9 @@ h2 {
   border-color: var(--line-strong);
 }
 
+.preview { padding-inline: 8px; font-size: 13px; }
+.preview:hover { text-decoration: underline; }
+
 .results-actions {
   display: flex;
   flex-wrap: wrap;
