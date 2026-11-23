@@ -1,7 +1,7 @@
-import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=7';
-import { compressPdfFile } from './pdf-output.mjs?v=7';
-import { openPdf, renderPdfPage } from './pdf.mjs?v=7';
-import { makeZip } from './zip.mjs?v=7';
+import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=8';
+import { compressPdfFile } from './pdf-output.mjs?v=8';
+import { openPdf, renderPdfPage } from './pdf.mjs?v=8';
+import { makeZip } from './zip.mjs?v=8';
 
 const choose = document.querySelector('#choose');
 const filesInput = document.querySelector('#files');
@@ -191,11 +191,12 @@ async function processPdfDownloads(entry, signal) {
     } else {
       const rows = document.createDocumentFragment();
       const digits = String(result.pageCount).length;
+      const partDigits = Math.max(2, String(result.parts.length).length);
       entry.pages = result.parts.map((part, index) => {
         const start = String(part.pageStart).padStart(digits, '0');
         const end = String(part.pageEnd).padStart(digits, '0');
-        const suffix = '-part-' + String(index + 1).padStart(2, '0') + '-of-' +
-          String(result.parts.length).padStart(2, '0') + '-pages-' + start + '-' + end;
+        const suffix = '-part-' + String(index + 1).padStart(partDigits, '0') + '-of-' +
+          String(result.parts.length).padStart(partDigits, '0') + '-pages-' + start + '-' + end;
         const name = uniqueOutputName(entry.sourceFile.name, usedNames, '.pdf', suffix);
         const output = createEntry(name);
         output.name = name;
@@ -277,7 +278,7 @@ for (const input of formatInputs) {
     outputLimit.textContent = pdf ? 'under 198 KB' : 'under 200 KB';
     pdfOptions.hidden = !pdf;
     formatHelp.textContent = pdf
-      ? 'PDFs are checked for size, page order, rendering and image detail. Large files split into up to 3 numbered PDFs under 198 KB each. Preview handwriting and stamps before use. Black & white removes scan colors.'
+      ? 'PDFs are checked for size, page order, rendering and image detail. Large files split into as many numbered PDF parts as needed, each under 198 KB. Preview handwriting and stamps before use. Black & white removes scan colors.'
       : 'Each PDF page becomes a separate JPEG under 200 KB.';
     reprocessFiles();
   });

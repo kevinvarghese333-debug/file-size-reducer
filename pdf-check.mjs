@@ -1,4 +1,4 @@
-import { openPdf, withPdfPage } from './pdf.mjs?v=7';
+import { openPdf, withPdfPage } from './pdf.mjs?v=8';
 
 function grayPixels(canvas) {
   const rgba = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
@@ -72,7 +72,7 @@ export async function checkPdfParts(parts, source, signal, onProgress) {
           const reference = await withPdfPage(source, sourceNumber, signal, grayPixels, dpi);
           const retention = retainedDetail(reference, decoded);
           if (retention < 0.85) {
-            throw new Error('Page ' + sourceNumber + ' lost too much image detail. Try Original colors or a clearer source scan.');
+            throw new Error('Page ' + sourceNumber + ' lost too much image detail. Choose a different PDF appearance or use a clearer source scan.');
           }
           lowestRetention = Math.min(lowestRetention, retention);
         }

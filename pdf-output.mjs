@@ -1,7 +1,7 @@
-import { loadImage } from './compress.mjs?v=7';
-import { openPdf, withPdfPage } from './pdf.mjs?v=7';
+import { loadImage } from './compress.mjs?v=8';
+import { openPdf, withPdfPage } from './pdf.mjs?v=8';
 import { encodeCcittFax } from './vendor/pdf-codec-5.9.0/image/ccitt-encode.js';
-import { checkPdfParts } from './pdf-check.mjs?v=7';
+import { checkPdfParts } from './pdf-check.mjs?v=8';
 
 export const PDF_BYTE_LIMIT = 198_000;
 
@@ -70,43 +70,54 @@ async function optimizeOriginal(file, signal) {
   return { blob: new Blob([bytes], { type: 'application/pdf' }), document: pdf };
 }
 
-// Try the most even page ranges first, then adjust boundaries to fit actual
-// byte sizes. Results stay consecutive and cover the full document.
+// Pack consecutive pages into as many parts as the actual byte sizes require.
+// Oversized candidates retain only their size to avoid caching large PDF buffers.
 export async function partitionPdf(total, encodeRange, signal) {
   const cache = new Map();
-  const failedRanges = new Set();
   async function encode(start, end) {
     signal.throwIfAborted();
     const key = start + '-' + end;
-    if (!cache.has(key)) cache.set(key, await encodeRange(start, end));
+    if (!cache.has(key)) {
+      const blob = await encodeRange(start, end);
+      cache.set(key, blob.size < PDF_BYTE_LIMIT ? blob : { size: blob.size });
+    }
     return cache.get(key);
   }
-  async function find(start, remaining) {
-    const key = start + '-' + remaining;
-    if (failedRanges.has(key)) return null;
-    if (remaining === 1) {
-      const blob = await encode(start, total);
-      if (blob.size < PDF_BYTE_LIMIT) return [{ blob, pageStart: start, pageEnd: total }];
-      failedRanges.add(key);
-      return null;
-    }
-    const idealEnd = start - 1 + Math.ceil((total - start + 1) / remaining);
-    const ends = Array.from({ length: total - remaining - start + 2 }, (_, index) => start + index);
-    ends.sort((a, b) => Math.abs(a - idealEnd) - Math.abs(b - idealEnd));
-    for (const end of ends) {
+
+  const parts = [];
+  let start = 1;
+  while (start <= total) {
+    const single = await encode(start, start);
+    if (single.size >= PDF_BYTE_LIMIT) return null;
+    let best = { blob: single, pageStart: start, pageEnd: start };
+    let low = start + 1;
+    let high = total;
+    while (low <= high) {
+      const end = Math.floor((low + high) / 2);
       const blob = await encode(start, end);
-      if (blob.size >= PDF_BYTE_LIMIT) continue;
-      const tail = await find(end + 1, remaining - 1);
-      if (tail) return [{ blob, pageStart: start, pageEnd: end }, ...tail];
+      if (blob.size < PDF_BYTE_LIMIT) {
+        best = { blob, pageStart: start, pageEnd: end };
+        low = end + 1;
+      } else {
+        high = end - 1;
+      }
     }
-    failedRanges.add(key);
-    return null;
+    parts.push(best);
+    start = best.pageEnd + 1;
   }
-  for (let count = 1; count <= Math.min(3, total); count++) {
-    const parts = await find(1, count);
-    if (parts) return parts;
+
+  // Prefer even ranges when they fit without increasing the part count.
+  const balanced = [];
+  start = 1;
+  for (let index = 0; index < parts.length; index++) {
+    const count = Math.ceil((total - start + 1) / (parts.length - index));
+    const end = start + count - 1;
+    const blob = await encode(start, end);
+    if (blob.size >= PDF_BYTE_LIMIT) return parts;
+    balanced.push({ blob, pageStart: start, pageEnd: end });
+    start = end + 1;
   }
-  return null;
+  return balanced;
 }
 
 // Threshold against the local paper brightness. This retains thin dark strokes
@@ -235,7 +246,7 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'c
         }];
         return await checkedResult(parts, source.document, total, signal, onProgress);
       }
-      if (optimized && optimized.blob.size < PDF_BYTE_LIMIT * 3) {
+      if (optimized && optimized.blob.size < PDF_BYTE_LIMIT * total) {
         const { PDFDocument } = await import('./vendor/pdf-lib-1.17.1/pdf-lib.min.mjs');
         onProgress('Checking page ranges for lossless PDF parts…');
         const parts = await partitionPdf(total, async (start, end) => {
@@ -253,36 +264,48 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'c
       }
     }
 
-    const resolutions = isPdf ? [300, 200] : [200];
-    for (const dpi of resolutions) {
-      const pages = [];
-      let imageBytes = 0;
-      for (let number = 1; number <= total; number++) {
-        signal.throwIfAborted();
+    const pages = [];
+    for (let number = 1; number <= total; number++) {
+      signal.throwIfAborted();
+      let prepared;
+      for (const dpi of (isPdf ? [300, 200] : [200])) {
         onProgress('Preparing page ' + number + ' of ' + total + ' at ' + dpi + ' dpi…');
-        const consume = (canvas, dimensions) => imagePage(canvas, dimensions, mode, dpi === 300 ? 0.9 : 0.82, signal);
-        const page = isPdf
+        const qualities = mode === 'monochrome' || dpi === 300
+          ? [0.9] : [0.9, 0.82, 0.72, 0.62, 0.52, 0.42, 0.32, 0.25, 0.2];
+        const consume = async (canvas, dimensions) => {
+          for (const quality of qualities) {
+            signal.throwIfAborted();
+            const page = await imagePage(canvas, dimensions, mode, quality, signal);
+            if (buildPdf([page]).size < PDF_BYTE_LIMIT) return { ...page, dpi };
+          }
+          return null;
+        };
+        prepared = isPdf
           ? await withPdfPage(source.document, number, signal, consume, dpi)
           : await withImageCanvas(file, signal, consume);
         signal.throwIfAborted();
-        pages.push(page);
-        imageBytes += page.bytes.length;
-        if (imageBytes >= PDF_BYTE_LIMIT * 3) break;
+        if (prepared) break;
       }
-      if (pages.length !== total || imageBytes >= PDF_BYTE_LIMIT * 3) continue;
-      onProgress('Finding clear PDF parts under 198 KB…');
-      const parts = await partitionPdf(total,
-        (start, end) => buildPdf(pages.slice(start - 1, end)), signal);
-      if (parts) {
-        for (const part of parts) {
-          part.detail = isPdf ? dpi + ' dpi · ' + (mode === 'monochrome' ? 'Black & white' : 'Color')
-            : 'Image quality preserved';
-        }
-        return await checkedResult(parts, source?.document, total, signal, onProgress);
+      if (!prepared) {
+        const suggestion = mode === 'color' ? ' Choose Black & white for scanned text.' : '';
+        throw new Error('Page ' + number + ' could not fit below 198 KB even as a separate PDF.' + suggestion);
       }
+      pages.push(prepared);
     }
-    const suggestion = mode === 'color' ? ' Try Black & white for scanned text.' : '';
-    throw new Error('This document could not fit into up to 3 clear PDFs below 198 KB each.' + suggestion);
+
+    onProgress('Splitting into numbered PDFs below 198 KB…');
+    const parts = await partitionPdf(total,
+      (start, end) => buildPdf(pages.slice(start - 1, end)), signal);
+    if (!parts) throw new Error('A page could not fit below 198 KB. Try Black & white for scanned text.');
+    for (const part of parts) {
+      const resolutions = pages.slice(part.pageStart - 1, part.pageEnd).map(page => page.dpi);
+      const low = Math.min(...resolutions);
+      const high = Math.max(...resolutions);
+      const resolution = low === high ? String(low) : low + '–' + high;
+      part.detail = isPdf ? resolution + ' dpi · ' + (mode === 'monochrome' ? 'Black & white' : 'Color')
+        : 'Image quality preserved';
+    }
+    return await checkedResult(parts, source?.document, total, signal, onProgress);
   } finally {
     if (source) await source.close().catch(() => {});
   }
