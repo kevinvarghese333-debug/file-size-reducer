@@ -1,8 +1,9 @@
-import { loadImage } from './compress.mjs?v=10';
-import { openPdf, withPdfPage } from './pdf.mjs?v=10';
+import { getPdfSettings, compressionProfiles, minimumPageDpi } from './pdf-settings.mjs?v=11';
+import { loadImage } from './compress.mjs?v=11';
+import { openPdf, withPdfPage } from './pdf.mjs?v=11';
 import { encodeCcittFax } from './vendor/pdf-codec-5.9.0/image/ccitt-encode.js';
-import { checkPdfParts } from './pdf-check.mjs?v=10';
-import { analyzeCanvas, otsuThreshold } from './page-analysis.mjs?v=10';
+import { checkPdfParts } from './pdf-check.mjs?v=11';
+import { analyzeCanvas, otsuThreshold } from './page-analysis.mjs?v=11';
 
 export const PDF_BYTE_LIMIT = 200_000;
 export const MAX_PDF_PARTS = 4;
@@ -74,14 +75,14 @@ async function optimizeOriginal(file, signal) {
 
 // Pack consecutive pages using actual PDF bytes; callers can request an overflow proposal.
 // Oversized candidates retain only their size to avoid caching large PDF buffers.
-export async function partitionPdf(total, encodeRange, signal, maximumParts = MAX_PDF_PARTS) {
+export async function partitionPdf(total, encodeRange, signal, maximumParts = MAX_PDF_PARTS, byteLimit = PDF_BYTE_LIMIT) {
   const cache = new Map();
   async function encode(start, end) {
     signal.throwIfAborted();
     const key = start + '-' + end;
     if (!cache.has(key)) {
       const blob = await encodeRange(start, end);
-      cache.set(key, blob.size < PDF_BYTE_LIMIT ? blob : { size: blob.size });
+      cache.set(key, blob.size < byteLimit ? blob : { size: blob.size });
     }
     return cache.get(key);
   }
@@ -90,14 +91,14 @@ export async function partitionPdf(total, encodeRange, signal, maximumParts = MA
   let start = 1;
   while (start <= total) {
     const single = await encode(start, start);
-    if (single.size >= PDF_BYTE_LIMIT) return null;
+    if (single.size >= byteLimit) return null;
     let best = { blob: single, pageStart: start, pageEnd: start };
     let low = start + 1;
     let high = total;
     while (low <= high) {
       const end = Math.floor((low + high) / 2);
       const blob = await encode(start, end);
-      if (blob.size < PDF_BYTE_LIMIT) {
+      if (blob.size < byteLimit) {
         best = { blob, pageStart: start, pageEnd: end };
         low = end + 1;
       } else {
@@ -116,7 +117,7 @@ export async function partitionPdf(total, encodeRange, signal, maximumParts = MA
     const count = Math.ceil((total - start + 1) / (parts.length - index));
     const end = start + count - 1;
     const blob = await encode(start, end);
-    if (blob.size >= PDF_BYTE_LIMIT) return parts;
+    if (blob.size >= byteLimit) return parts;
     balanced.push({ blob, pageStart: start, pageEnd: end });
     start = end + 1;
   }
@@ -124,7 +125,7 @@ export async function partitionPdf(total, encodeRange, signal, maximumParts = MA
     const left = balanced[index];
     const right = balanced[index + 1];
     const blob = await encode(left.pageStart, right.pageEnd);
-    if (blob.size < PDF_BYTE_LIMIT) {
+    if (blob.size < byteLimit) {
       balanced.splice(index, 2, { blob, pageStart: left.pageStart, pageEnd: right.pageEnd });
       index = Math.max(0, index - 1);
     } else index++;
@@ -221,18 +222,18 @@ async function withImageCanvas(file, signal, consume) {
   }
 }
 
-async function checkedResult(parts, source, total, signal, onProgress, record) {
-  await checkPdfParts(parts, source, signal, onProgress, record, Infinity);
+async function checkedResult(parts, source, total, signal, onProgress, record, settings) {
+  await checkPdfParts(parts, source, signal, onProgress, record, Infinity, settings.byteLimit);
   signal.throwIfAborted();
   record('candidate_verified', { partCount: parts.length, pageCount: total,
     parts: parts.map(part => ({ pageStart: part.pageStart, pageEnd: part.pageEnd,
       bytes: part.blob.size, detail: part.detail, detailRetention: part.detailRetention })) });
-  return { parts, pageCount: total, requiresApproval: parts.length > MAX_PDF_PARTS, blob: parts.length === 1 ? parts[0].blob : undefined,
+  return { parts, pageCount: total, requiresApproval: parts.length > settings.maximumParts, byteLimit: settings.byteLimit, maximumParts: settings.maximumParts, blob: parts.length === 1 ? parts[0].blob : undefined,
     detail: parts[0].detail };
 }
 
-function limitError(reason) {
-  const error = new Error(reason + ' No output passed both the 200 KB per-file limit and the detail checks. More files alone could not resolve this. Download logs for the page-by-page diagnosis.');
+function limitError(reason, settings) {
+  const error = new Error(reason + ' No output passed both the ' + settings.limitLabel + ' per-file limit and the detail checks. More files alone could not resolve this. Download logs for the page-by-page diagnosis.');
   error.code = 'PDF_SIZE_QUALITY_LIMIT';
   return error;
 }
@@ -250,11 +251,12 @@ function describeParts(parts, pages, isPdf) {
   }
 }
 
-export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'auto', record = () => {}) {
+export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'auto', record = () => {}, settings = getPdfSettings()) {
+  const { byteLimit, maximumParts } = settings;
   let source;
   try {
-    record('document_started', { inputBytes: file.size, appearance: mode, maximumParts: MAX_PDF_PARTS,
-      maximumPartBytes: PDF_BYTE_LIMIT, minimumDetailRetention: 0.92 });
+    record('document_started', { outputOption: settings.id, inputBytes: file.size, appearance: mode, maximumParts: maximumParts,
+      maximumPartBytes: byteLimit, minimumDetailRetention: 0.92 });
     if (isPdf) source = await openPdf(file, signal);
     signal.throwIfAborted();
     const total = source?.document.numPages ?? 1;
@@ -270,10 +272,10 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
     }
 
     let best;
-    if (isPdf && mode !== 'monochrome' && file.size < PDF_BYTE_LIMIT) {
+    if (isPdf && mode !== 'monochrome' && file.size < byteLimit) {
       const parts = [{ blob: new Blob([file], { type: 'application/pdf' }),
         pageStart: 1, pageEnd: total, detail: 'Original quality' }];
-      return await checkedResult(parts, source.document, total, signal, onProgress, record);
+      return await checkedResult(parts, source.document, total, signal, onProgress, record, settings);
     }
 
     if (isPdf && mode !== 'monochrome') {
@@ -286,9 +288,9 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
         signal.throwIfAborted();
         record('lossless_unavailable', { reason: error.message });
       }
-      if (optimized?.blob.size < PDF_BYTE_LIMIT) {
+      if (optimized?.blob.size < byteLimit) {
         const parts = [{ blob: optimized.blob, pageStart: 1, pageEnd: total, detail: 'Text and graphics preserved' }];
-        return await checkedResult(parts, source.document, total, signal, onProgress, record);
+        return await checkedResult(parts, source.document, total, signal, onProgress, record, settings);
       }
       if (optimized) {
         const { PDFDocument } = await import('./vendor/pdf-lib-1.17.1/pdf-lib.min.mjs');
@@ -299,21 +301,17 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
           for (const page of pages) pdf.addPage(page);
           return new Blob([await pdf.save({ useObjectStreams: true, updateFieldAppearances: false })],
             { type: 'application/pdf' });
-        }, signal, Infinity);
-        record('lossless_partition', { fitsFourParts: Boolean(parts && parts.length <= MAX_PDF_PARTS), partCount: parts?.length });
+        }, signal, Infinity, byteLimit);
+        record('lossless_partition', { fitsPreferredParts: Boolean(parts && parts.length <= maximumParts), partCount: parts?.length });
         if (parts) {
           for (const part of parts) part.detail = 'Text and graphics preserved';
-          best = await checkedResult(parts, source.document, total, signal, onProgress, record);
+          best = await checkedResult(parts, source.document, total, signal, onProgress, record, settings);
           if (parts.length === 1) return best;
         }
       }
     }
 
-    const profiles = [
-      { dpi: 300, quality: 0.9 }, { dpi: 240, quality: 0.88 }, { dpi: 200, quality: 0.85 },
-      { dpi: 180, quality: 0.82 }, { dpi: 160, quality: 0.78 }, { dpi: 150, quality: 0.76 },
-      { dpi: 150, quality: 0.6 }, { dpi: 150, quality: 0.45 }, { dpi: 150, quality: 0.3 },
-    ];
+    const profiles = compressionProfiles(settings);
     const previous = [];
     let lastFailure = 'The pages need more space at the detected text size.';
     for (let index = 0; index < profiles.length; index++) {
@@ -324,8 +322,8 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
       for (let number = 1; number <= total; number++) {
         signal.throwIfAborted();
         const analysis = analyses[number - 1];
-        // A 150 dpi fallback still has to pass the decoded-output detail checks.
-        const minimumDpi = profile.dpi === 150 ? 150 : analysis.minimumDpi;
+        // Smaller deed copies retain estimated text size and pass decoded checks.
+        const minimumDpi = minimumPageDpi(analysis, settings, profile.dpi);
         const dpi = isPdf ? Math.max(profile.dpi, minimumDpi, analysis.forceDpi || 0) : 200;
         const appearance = analysis.forceMode || (mode === 'auto' ? analysis.recommendedMode : mode);
         const thresholdMethod = analysis.forceThreshold || analysis.thresholdMethod;
@@ -349,19 +347,19 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
           encodedImageBytes: page.bytes.length,
           estimatedTextPixels: analysis.estimatedTextHeight
             ? Number((analysis.estimatedTextHeight * dpi / analysis.referenceDpi).toFixed(2)) : null });
-        if (buildPdf([page]).size >= PDF_BYTE_LIMIT) break;
+        if (buildPdf([page]).size >= byteLimit) break;
       }
       if (pages.length !== total) {
-        lastFailure = 'A page still exceeds 200 KB at the tried resolution of ' + profile.dpi + ' dpi.';
+        lastFailure = 'A page still exceeds ' + settings.limitLabel + ' at the tried resolution of ' + profile.dpi + ' dpi.';
         record('attempt_rejected', { reason: 'byte_budget', preparedPages: pages.length, encodedImageBytes: bytes });
         continue;
       }
       onProgress('Finding the fewest PDF parts that fit…');
-      const parts = await partitionPdf(total, (start, end) => buildPdf(pages.slice(start - 1, end)), signal, Infinity);
-      record('partition_attempt', { encodedImageBytes: bytes, fitsFourParts: Boolean(parts && parts.length <= MAX_PDF_PARTS), partCount: parts?.length,
+      const parts = await partitionPdf(total, (start, end) => buildPdf(pages.slice(start - 1, end)), signal, Infinity, byteLimit);
+      record('partition_attempt', { encodedImageBytes: bytes, fitsPreferredParts: Boolean(parts && parts.length <= maximumParts), partCount: parts?.length,
         ranges: parts?.map(part => [part.pageStart, part.pageEnd]), sizes: parts?.map(part => part.blob.size) });
       if (!parts) {
-        lastFailure = 'A page still exceeds 200 KB at the tried resolution of ' + profile.dpi + ' dpi.';
+        lastFailure = 'A page still exceeds ' + settings.limitLabel + ' at the tried resolution of ' + profile.dpi + ' dpi.';
         continue;
       }
       if (best && parts.length >= best.parts.length) {
@@ -370,7 +368,7 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
       }
       describeParts(parts, pages, isPdf);
       try {
-        const result = await checkedResult(parts, source?.document, total, signal, onProgress, record);
+        const result = await checkedResult(parts, source?.document, total, signal, onProgress, record, settings);
         record('consolidation_attempt', { partCount: parts.length, previousPartCount: best?.parts.length, improved: true });
         best = result;
         if (parts.length === 1) return result;
@@ -390,7 +388,7 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
           analysis.forceDpi = 200;
         } else {
           if (best) { lastFailure = error.message; break; }
-          throw limitError(error.message);
+          throw limitError(error.message, settings);
         }
         record('page_quality_restore', { page: error.pageNumber, forceDpi: analysis.forceDpi,
           forceMode: analysis.forceMode, forceThreshold: analysis.forceThreshold });
@@ -399,7 +397,7 @@ export async function compressPdfFile(file, isPdf, signal, onProgress, mode = 'a
       }
     }
     if (best) return best;
-    throw limitError(lastFailure);
+    throw limitError(lastFailure, settings);
   } catch (error) {
     record('conversion_stopped', { code: error.code || error.name, reason: error.message });
     throw error;

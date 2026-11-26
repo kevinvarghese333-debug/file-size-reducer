@@ -1,5 +1,5 @@
-import { BYTE_LIMIT } from './compress.mjs?v=10';
-import { PDF_BYTE_LIMIT } from './pdf-output.mjs?v=10';
+import { BYTE_LIMIT } from './compress.mjs?v=11';
+import { getPdfSettings } from './pdf-settings.mjs?v=11';
 
 const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {
   let value = index;
@@ -25,10 +25,11 @@ export async function makeZip(entries) {
   let offset = 0;
   let directorySize = 0;
 
-  for (const { name, blob } of entries) {
-    const limit = blob.type === 'application/pdf' ? PDF_BYTE_LIMIT : BYTE_LIMIT;
+  for (const { name, blob, outputFormat } of entries) {
+    const limit = blob.type === 'application/pdf'
+      ? getPdfSettings(outputFormat === 'deed' ? 'deed' : 'pdf').byteLimit : BYTE_LIMIT;
     if (!['application/pdf', 'image/jpeg'].includes(blob.type) || blob.size >= limit) {
-      throw new Error('Each PDF must be under 198 KB and each JPEG under 200 KB.');
+      throw new Error(name + ' must be a supported file below ' + (limit / 1000) + ' KB. Convert it again before downloading.');
     }
     const filename = encoder.encode(name);
     const bytes = new Uint8Array(await blob.arrayBuffer());

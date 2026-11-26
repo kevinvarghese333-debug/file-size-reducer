@@ -1,4 +1,4 @@
-import { openPdf, withPdfPage } from './pdf.mjs?v=10';
+import { openPdf, withPdfPage } from './pdf.mjs?v=11';
 
 function grayPixels(canvas) {
   const rgba = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
@@ -42,13 +42,13 @@ export function retainedDetail(reference, output) {
   return total ? retained / total : 1;
 }
 
-export async function checkPdfParts(parts, source, signal, onProgress, record = () => {}, maximumParts = 4) {
+export async function checkPdfParts(parts, source, signal, onProgress, record = () => {}, maximumParts = 4, byteLimit = 200_000) {
   if (!parts.length || parts.length > maximumParts) {
     throw new Error('The output must contain between 1 and ' + maximumParts + ' PDFs.');
   }
   let expectedPage = 1;
   for (const part of parts) {
-    if (part.blob.type !== 'application/pdf' || part.blob.size >= 200_000 ||
+    if (part.blob.type !== 'application/pdf' || part.blob.size >= byteLimit ||
         part.pageStart !== expectedPage || part.pageEnd < part.pageStart) {
       throw new Error('The generated PDF failed its file-size or page-order check.');
     }

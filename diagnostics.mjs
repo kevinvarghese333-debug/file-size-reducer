@@ -28,7 +28,7 @@ function persist() {
 export function startDiagnosticJob(file, settings) {
   const job = {
     id: crypto.randomUUID(),
-    appVersion: '10',
+    appVersion: '11',
     startedAt: new Date().toISOString(),
     status: 'queued',
     input: { name: file.name, bytes: file.size, type: file.type },

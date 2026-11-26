@@ -135,6 +135,7 @@ h1 #output-limit {
 }
 
 .format-picker input {
+  flex: 0 0 18px;
   width: 18px;
   height: 18px;
   accent-color: var(--ink);

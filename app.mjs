@@ -1,8 +1,9 @@
-import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=10';
-import { compressPdfFile, MAX_PDF_PARTS, PDF_BYTE_LIMIT } from './pdf-output.mjs?v=10';
-import { openPdf, renderPdfPage } from './pdf.mjs?v=10';
-import { makeZip } from './zip.mjs?v=10';
-import { startDiagnosticJob, diagnosticLogBlob } from './diagnostics.mjs?v=10';
+import { getPdfSettings } from './pdf-settings.mjs?v=11';
+import { compressImage, uniqueJpegName, uniqueOutputName } from './compress.mjs?v=11';
+import { compressPdfFile } from './pdf-output.mjs?v=11';
+import { openPdf, renderPdfPage } from './pdf.mjs?v=11';
+import { makeZip } from './zip.mjs?v=11';
+import { startDiagnosticJob, diagnosticLogBlob } from './diagnostics.mjs?v=11';
 
 const choose = document.querySelector('#choose');
 const filesInput = document.querySelector('#files');
@@ -111,7 +112,7 @@ function showResult(entry, blob) {
 }
 
 function reportFailure(entry, message) {
-  const mode = entry.outputFormat === 'pdf'
+  const mode = entry.outputFormat !== 'jpeg'
     ? ({ auto: 'Automatic', monochrome: 'Black & white', color: 'Original colors' }[entry.pdfMode]) : '';
   const context = entry.pageLabel || mode;
   entry.status.textContent = (context ? context + ' · ' : '') + message;
@@ -204,11 +205,12 @@ function presentPdfResult(entry, result) {
     entry.pages = result.parts.map((part, index) => {
       const start = String(part.pageStart).padStart(digits, '0');
       const end = String(part.pageEnd).padStart(digits, '0');
-      const suffix = '-part-' + String(index + 1).padStart(partDigits, '0') + '-of-' +
+      const suffix = (entry.outputFormat === 'deed' ? '-deed-copy' : '') + '-part-' + String(index + 1).padStart(partDigits, '0') + '-of-' +
         String(result.parts.length).padStart(partDigits, '0') + '-pages-' + start + '-' + end;
       const name = uniqueOutputName(entry.sourceFile.name, usedNames, '.pdf', suffix);
       const output = createEntry(name);
       output.name = name;
+      output.outputFormat = entry.outputFormat;
       output.pageLabel = 'Part ' + (index + 1) + ' of ' + result.parts.length +
         ' · Pages ' + part.pageStart + '–' + part.pageEnd;
       output.pageCount = part.pageEnd - part.pageStart + 1;
@@ -232,7 +234,7 @@ function requestPdfApproval(entry, result, signal) {
   entry.pendingResult = result;
   counts.awaiting++;
   const count = result.parts.length;
-  entry.status.textContent = count + ' PDFs are needed at the checked settings, each below 200 KB. This exceeds the default of 4. Proceed?';
+  entry.status.textContent = count + ' PDFs are needed at the checked settings, each below ' + entry.pdfSettings.limitLabel + '. This exceeds the target of ' + entry.pdfSettings.maximumParts + '. Proceed?';
   entry.log.record('approval_requested', { partCount: count, pageCount: result.pageCount,
     parts: result.parts.map(part => ({ pageStart: part.pageStart, pageEnd: part.pageEnd, bytes: part.blob.size })) });
   const proposal = document.createElement('div');
@@ -280,7 +282,7 @@ async function processPdfDownloads(entry, signal) {
   try {
     const result = await compressPdfFile(entry.file, entry.isPdf, signal, message => {
       if (!signal.aborted) entry.status.textContent = message;
-    }, entry.pdfMode, entry.log.record);
+    }, entry.pdfMode, entry.log.record, entry.pdfSettings);
     if (signal.aborted) return;
 
     if (result.requiresApproval) requestPdfApproval(entry, result, signal);
@@ -303,7 +305,7 @@ async function processQueue() {
     while ((entry = entries.find(item => item.file))) {
       try {
         const signal = batch.signal;
-        if (entry.outputFormat === 'pdf') {
+        if (entry.outputFormat !== 'jpeg') {
           await processPdfDownloads(entry, signal);
         } else if (entry.isPdf) {
           await processPdf(entry, signal);
@@ -329,11 +331,12 @@ function addFiles(files) {
     entry.file = file;
     entry.outputFormat = document.querySelector('[name="output-format"]:checked').value;
     entry.pdfMode = pdfMode.value;
+    entry.pdfSettings = getPdfSettings(entry.outputFormat === 'deed' ? 'deed' : 'pdf');
     entry.log = startDiagnosticJob(file, { format: entry.outputFormat, appearance: entry.pdfMode,
-      maximumPdfParts: MAX_PDF_PARTS, maximumPdfBytes: PDF_BYTE_LIMIT });
+      maximumPdfParts: entry.pdfSettings.maximumParts, maximumPdfBytes: entry.pdfSettings.byteLimit });
     entry.isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-    if (entry.outputFormat === 'pdf') {
-      entry.name = uniqueOutputName(file.name, usedNames, '.pdf', '-compressed');
+    if (entry.outputFormat !== 'jpeg') {
+      entry.name = uniqueOutputName(file.name, usedNames, '.pdf', entry.outputFormat === 'deed' ? '-deed-copy' : '-compressed');
     } else if (!entry.isPdf) {
       entry.name = uniqueJpegName(file.name, usedNames);
     }
@@ -349,11 +352,15 @@ function addFiles(files) {
 choose.addEventListener('click', () => filesInput.click());
 for (const input of formatInputs) {
   input.addEventListener('change', () => {
-    const pdf = input.value === 'pdf';
-    outputTitle.textContent = pdf ? 'Make PDFs ' : 'Make JPEGs ';
-    outputLimit.textContent = 'under 200 KB';
+    const pdf = input.value !== 'jpeg';
+    const deed = input.value === 'deed';
+    outputTitle.textContent = deed ? 'Make deed copies ' : pdf ? 'Make PDFs ' : 'Make JPEGs ';
+    outputLimit.textContent = deed ? 'under 498 KB' : 'under 200 KB';
+    document.title = 'Image Desk — ' + (deed ? 'Deed copies under 498 KB' : pdf ? 'PDFs under 200 KB' : 'JPEGs under 200 KB');
     pdfOptions.hidden = !pdf;
-    formatHelp.textContent = pdf
+    formatHelp.textContent = deed
+      ? 'Only for deed copies. Aims for 1 or 2 PDFs, each below 498 KB. Reduces resolution when needed while checking text size and image detail. If more than 2 files are needed, review the exact count and sizes, then choose Proceed or Cancel. Preview handwriting and stamps before use.'
+      : pdf
       ? 'Automatic analyzes each page and may use black & white for text scans. It tries 150 dpi when needed and combines pages into as few PDFs as possible, each below 200 KB. If more than 4 are needed, it shows the checked file count and asks you to proceed or cancel. Conversion stops if size and detail checks cannot be met. Preview handwriting and stamps before use.'
       : 'Each PDF page becomes a separate JPEG under 200 KB.';
     reprocessFiles();

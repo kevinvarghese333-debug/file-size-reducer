@@ -2,10 +2,10 @@
 
 Browser-based PDF and image compression, deployed at https://kavitha.cloud/compressor/.
 
-- PDF is the default output. Each PDF must be strictly smaller than 200,000 bytes.
+- Three output options, in order: Image (JPEG) below 200,000 bytes, PDF below 200,000 bytes (the default), and Deed copy below 498,000 bytes (only for deed copies). The deed limit leaves a margin below 500 KB.
 - Automatic inspects each page and can choose black & white for text scans. Original colors and black & white are also selectable.
-- Tries original PDF optimization first, then raster profiles down to 150 dpi when necessary. It keeps the highest-quality checked candidate for the fewest parts found within these profiles.
-- Combines consecutive pages using actual encoded PDF sizes, including PDF overhead. Up to four numbered parts are made available automatically. If more are needed, the checked proposal shows the exact count, page ranges and sizes, with Proceed and Cancel buttons. No download links appear until it is accepted.
+- Tries original PDF optimization first, then raster profiles down to 150 dpi for standard PDFs. Deed copies may try 100–140 dpi where estimated text remains at least 10 pixels high; mixed/unknown handwriting retains a 150 dpi floor. Every candidate must pass the same detail checks. It keeps the highest-quality checked candidate for the fewest parts found within these profiles.
+- Combines consecutive pages using actual encoded PDF sizes, including PDF overhead. Up to four numbered parts are made available automatically for standard PDFs. Deed copies aim for one or two parts, and require approval above two. If more are needed, the checked proposal shows the exact count, page ranges and sizes, with Proceed and Cancel buttons. No download links appear until it is accepted.
 - Every PDF is reopened and every page rendered before download links appear. Checks cover size, page count, order, layout and source-edge retention. This is an automated detail check, not a guarantee of semantic legibility; preview handwriting and stamps.
 - If no candidate passes the per-file size and quality limits, stops with an explanation. No oversized fallback is offered.
 - JPEG output keeps the existing per-page conversion below 200,000 bytes. Bulk upload and ZIP downloads are supported.
@@ -21,5 +21,5 @@ Serve this directory with a static HTTP server. All assets and PDF libraries are
 Run the partition regression checks with:
 
 ```sh
-node --test tests/pdf-partition.test.mjs
+node --test tests/*.test.mjs
 ```

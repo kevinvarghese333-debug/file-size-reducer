@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Analyze and compress PDFs into checked parts with confirmation above four files below 200 KB each, with local diagnostic logs and JPEG conversion.">
+  <meta name="description" content="Compress images and PDFs below 200 KB, or choose deed copies below 498 KB, with checked output, confirmation and local logs.">
   <title>Image Desk — PDFs under 200 KB</title>
-  <link rel="stylesheet" href="styles.css?v=10">
-  <script type="module" src="app.mjs?v=10"></script>
+  <link rel="stylesheet" href="styles.css?v=11">
+  <script type="module" src="app.mjs?v=11"></script>
 </head>
 <body>
   <header class="site-header">
@@ -27,8 +27,9 @@
         </div>
         <fieldset class="format-picker">
           <legend>Download format</legend>
+          <label><input type="radio" name="output-format" value="jpeg"> Image (JPEG) · under 200 KB</label>
           <label><input type="radio" name="output-format" value="pdf" checked> PDF · under 200 KB</label>
-          <label><input type="radio" name="output-format" value="jpeg"> JPEG · under 200 KB</label>
+          <label><input type="radio" name="output-format" value="deed"> Deed copy · less than 498 KB (only for deed copies)</label>
         </fieldset>
         <div id="pdf-options" class="pdf-options">
           <label for="pdf-mode">PDF appearance</label>
